@@ -5,7 +5,9 @@ date: "6/7/2017"
 output: html_document
 ---
 
+### Document Purpose
 
+Provides general overview of how to perform mediation analysis. 
 
 ```{r load libraries, warning=F, message=F}
 library(broom) # for easy conversion of model results to dataframes
