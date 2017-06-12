@@ -1,0 +1,211 @@
+---
+title: "Simple Mediation Example"
+author: "Ryan Gan"
+date: "6/7/2017"
+output: html_document
+---
+
+
+
+```{r load libraries, warning=F, message=F}
+library(broom) # for easy conversion of model results to dataframes
+library(tidyverse) # data wrangling
+library(MASS) # simulate correlations between two continous variables
+```
+
+Simulating a mediated dataframe where x -> m -> y
+
+```{r sim mediated data}
+# set df observations
+n <- 500
+# set seed
+set.seed(303)
+
+# simulate strong correlation between x and m
+
+xm_data <- as_tibble(mvrnorm(n, mu = c(6, 4), Sigma = matrix(c(1,0.7,0.7,1), ncol = 2)))
+# assign col names
+colnames(xm_data) <- c("x", "m")
+# check to amek sure correlation is ~70%
+cor(xm_data)
+ 
+# making continous x
+sim_data <- xm_data %>% 
+  # simulate protective effect between x and y
+  mutate(y = rbinom(n, 1, 1/(1+exp(-(1+-0.6*m)))))
+```
+
+Some summary stats.
+
+```{r outcome pr}
+summary(sim_data)
+
+prop.table(xtabs(~sim_data$y))
+```
+
+In our simulated data, our outcome makes up roughly 21% of our population. Thus OR will not approximate true risk.
+
+First step is to establish the Total Effect (TE) relationship between x and y.
+
+```{r xy association}
+# check mod estimates
+# this is referered to the direct effect
+te_mod <- tidy((glm(y~x, sim_data, family="binomial"(link="logit"))))
+te_mod
+
+# going to start to fill in standard estimates and CIs
+std_est <- as.data.frame(matrix(NA, ncol=4, nrow=3))
+colnames(std_est) <- c("est", "rel_est", "lower_95", "upper_95")
+
+# OR
+std_est[1,1] <- "total_effect"
+std_est[1,2] <- round(exp(te_mod[2,2]),3)
+# 95 CI
+std_est[1, 3:4] <- round(exp(c(te_mod[2,2]-1.96*te_mod[2,3],
+                               te_mod[2,2]+1.96*te_mod[2,3])),3)
+```
+
+Second step is establishing x -> m, and m -> y relationship. These two estimates are required to meet the assumption, and to estimate the indirect/mediated path.
+
+```{r xm and my association}
+# linear x -> m mod beta
+xm_mod <- tidy(glm(m~x, sim_data, family = "gaussian"(link="identity")))
+xm_mod
+
+# logit m -> y mod beta
+my_mod <- tidy(glm(y~m, sim_data, family="binomial"(link="logit")))
+my_mod
+
+# OR
+round(exp(my_mod[2,2]),3)
+# 95 CI
+round(exp(c(my_mod[2,2]-1.96*my_mod[2,3], my_mod[2,2]+1.96*my_mod[2,3])),3)
+```
+
+Now that each path of the DAG has been confirmed, we calculate the controled direct effect (CDE).
+
+```{r cde}
+cde_mod <- tidy(glm(y~ x + m, sim_data, family="binomial"(link="logit")))  
+cde_mod
+
+# OR
+std_est[2,1] <- "cde"
+std_est[2,2] <- round(exp(cde_mod[2,2]),3)
+# 95 CI
+std_est[2,3:4] <- round(exp(c(cde_mod[2,2]-1.96*cde_mod[2,3],
+                              cde_mod[2,2]+1.96*cde_mod[2,3])),3)
+```
+
+Notice the association betwene x and y essentially is null when m is in the model. Some old epi text books say this is evidence of mediation, assuming m is an intermediate variable. This might be a decent hint, but we can actually quantify the indirect effect, sometimes refered to Natural Indirect Effect (NIE) when there is no interaction between the mediator and predictor.
+
+When all our variables are continous TE - CDE = xm*teta2 = NIE
+
+Where theta2 is m on y effect in the adjusted CDE model.
+
+If all our variables are not continoous, then TE - CDE only approximates xm*theta2 = NIE. I'd advise use of the product method for most cases.
+
+```{r nie estimates}
+# te - cde
+nie1 <- round(te_mod[2,2] - cde_mod[2,2], 3) 
+# OR
+exp(nie1)
+cde_mod
+# xm * my nie
+nie2 <- round(xm_mod[2,2]*cde_mod[3,2],3)
+# OR
+exp(nie2)
+```
+
+General interpretation for the NIE:
+
+A 1 unit increase in x as it passes through mediator m reduces the odds of y by 40%.
+
+Next step is to estimate 95% confidence intervals. We have two choices, the product method/Sobel? test and bootstrapping. In this simulated example, they should be equivalent. For small sample sizes like with the 9health data, it's better to bootstrap as the Sobel test is likely unstable.
+
+```{r nie se sobel}
+# we will use estimates from these models to caculate the joint se
+beta1 <- xm_mod[2,2]
+theta2 <- cde_mod[3,2]
+var_beta1 <- xm_mod[2,3]^2
+var_theta2 <- cde_mod[3,3]^2
+
+# calculate standard error of the nie
+nie_se <- sqrt((theta2^2*var_beta1)+(beta1^2*var_theta2))
+
+# estimate OR and 95% CI
+std_est[3,1] <- "nie"
+std_est[3,2:4] <- round(exp(c(nie2, nie2-1.96*nie_se, 
+                                         nie2+1.96*nie_se)),3)
+
+std_est
+```
+
+With small sample sizes, better to bootstrap bounds. I tend to use the percentile method since it's just easier to use with the broom package.
+
+```{r mediation function}
+# define function, mediation (simple function that doesn't have covariate)
+mediation <- function(data, y, x, m, y_family, m_family){
+
+ 
+ total_effect <- glm(y~x, data, family=y_family)$coefficients[2]
+ cde <- glm(y~x+m, data, family=y_family)$coefficients[2]
+ nie <- (glm(m~x, data, family=m_family)$coefficients[2]*
+         glm(y~x+m, data, family=y_family)$coefficients[3])
+ 
+ estimates <- cbind(total_effect, cde, nie)
+ return(estimates)
+ 
+}
+```
+
+
+Testing mediation function.
+
+```{r testing mediation funciton}
+# testing mediation function  
+test <- mediation(sim_data,y="y", x="x", m="m", y_family="binomial",
+                 m_family="gaussian")
+
+test
+```
+
+
+Bootstrapped estimate terms. Median, 2.5 and 97.5 percentile should be good approximations of mean and 95% CI estimate terms.
+
+```{r mediation boot}
+# booting 1000 times 
+boot_mediation <- sim_data %>% bootstrap(1000) %>% 
+  do(tidy(mediation(data=., y="y", x="x", m="m", y_family="binomial",
+                 m_family="gaussian")))
+
+# estimates (empty matrix)
+est <- matrix(NA, ncol=4, nrow=3) 
+colnames(est) <- c("est", "median", "lower_95", "upper_95")
+
+# fill total effect values
+est[1,1] <- "total_effect"
+est[1,2] <- round(exp(quantile(boot_mediation$total_effect, 0.5)),3)
+est[1,3] <- round(exp(quantile(boot_mediation$total_effect, 0.025)),3)
+est[1,4] <- round(exp(quantile(boot_mediation$total_effect, 0.975)),3)
+
+# fill cde values
+est[2,1] <- "cde"
+est[2,2] <- round(exp(quantile(boot_mediation$cde, 0.5)),3)
+est[2,3] <- round(exp(quantile(boot_mediation$cde, 0.025)),3)
+est[2,4] <- round(exp(quantile(boot_mediation$cde, 0.975)),3)
+
+# fill nie values
+est[3,1] <- "nie"
+est[3,2] <- round(exp(quantile(boot_mediation$nie, 0.5)),3)
+est[3,3] <- round(exp(quantile(boot_mediation$nie, 0.025)),3)
+est[3,4] <- round(exp(quantile(boot_mediation$nie, 0.975)),3)
+
+booted_estimates <- as_data_frame(est)
+
+# booted estimates
+knitr::kable(booted_estimates, caption = "Booted Estimated Effects")
+
+# standard estimates
+knitr::kable(std_est, caption = "Standard Estimated Effects")
+```
+
