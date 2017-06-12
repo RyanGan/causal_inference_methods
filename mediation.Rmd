@@ -51,7 +51,7 @@ First step is to establish the Total Effect (TE) relationship between x and y.
 ```{r xy association}
 # check mod estimates
 # this is referered to the direct effect
-te_mod <- tidy((glm(y~x, sim_data, family="binomial"(link="logit"))))
+te_mod <- tidy((glm(y~x+c, sim_data, family="poisson"(link = "log"))))
 te_mod
 
 # going to start to fill in standard estimates and CIs
@@ -70,11 +70,11 @@ Second step is establishing x -> m, and m -> y relationship. These two estimates
 
 ```{r xm and my association}
 # linear x -> m mod beta
-xm_mod <- tidy(glm(m~x, sim_data, family = "gaussian"(link="identity")))
+xm_mod <- tidy(glm(m~x+c, sim_data, family = "gaussian"(link="identity")))
 xm_mod
 
 # logit m -> y mod beta
-my_mod <- tidy(glm(y~m, sim_data, family="binomial"(link="logit")))
+my_mod <- tidy(glm(y~m+c, sim_data, family="poisson"(link="log")))
 my_mod
 
 # OR
@@ -86,7 +86,7 @@ round(exp(c(my_mod[2,2]-1.96*my_mod[2,3], my_mod[2,2]+1.96*my_mod[2,3])),3)
 Now that each path of the DAG has been confirmed, we calculate the controled direct effect (CDE).
 
 ```{r cde}
-cde_mod <- tidy(glm(y~ x + m, sim_data, family="binomial"(link="logit")))  
+cde_mod <- tidy(glm(y~ x + m + c, sim_data, family="poisson"(link="log")))  
 cde_mod
 
 # OR
@@ -201,6 +201,7 @@ test2
 Bootstrapped estimate terms. Median, 2.5 and 97.5 percentile should be good approximations of mean and 95% CI estimate terms.
 
 ```{r mediation boot}
+set.seed(321)
 # booting 1000 times 
 boot_mediation <- sim_data %>% bootstrap(1000) %>% 
   do(tidy(mediation(data=., y="y", x="x", m="m", c="c", y_family="poisson",
