@@ -237,3 +237,6 @@ knitr::kable(booted_estimates, caption = "Booted Estimated Effects")
 knitr::kable(std_est, caption = "Standard Estimated Effects")
 ```
 
+### TO DO
+
+I haven't modified the rest of the document after updating the funciton to handle confounding.
