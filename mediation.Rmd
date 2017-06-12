@@ -21,18 +21,19 @@ n <- 500
 # set seed
 set.seed(303)
 
-# simulate strong correlation between x and m
-
-xm_data <- as_tibble(mvrnorm(n, mu = c(6, 4), Sigma = matrix(c(1,0.7,0.7,1), ncol = 2)))
+# simulate strong correlation between x and m 
+# also going to add a confounder correlated with both x and m
+cov_mat <- matrix(c(1,0.7,0.4,0.7,1,0.3,0.4,0.3,1), ncol=3)
+xm_data <- as_tibble(mvrnorm(n, mu = c(6, 4, 10), Sigma = cov_mat))
 # assign col names
-colnames(xm_data) <- c("x", "m")
+colnames(xm_data) <- c("x", "m", "c")
 # check to amek sure correlation is ~70%
 cor(xm_data)
  
 # making continous x
 sim_data <- xm_data %>% 
   # simulate protective effect between x and y
-  mutate(y = rbinom(n, 1, 1/(1+exp(-(1+-0.6*m)))))
+  mutate(y = rbinom(n, 1, 1/(1+exp(-(1+-0.6*m + 0.01*c)))))
 ```
 
 Some summary stats.
@@ -144,16 +145,37 @@ With small sample sizes, better to bootstrap bounds. I tend to use the percentil
 
 ```{r mediation function}
 # define function, mediation (simple function that doesn't have covariate)
-mediation <- function(data, y, x, m, y_family, m_family){
+mediation <- function(data, y, x, m, c, y_family, m_family){
 
+  # if c covariates not specified
+  if(missing(c)){
+  # define total effect model
+  te_mod <- glm(y~x, data, family=y_family)
+  # define cde mod
+  cde_mod <- glm(y~x+m, data, family=y_family)
+  # define x m mod
+  m_x_mod <- glm(m~x, data, family=m_family)
+  
+  # now if c is specified, adjust for covariates
+  } else {  
+  te_mod <- glm(as.formula(paste(y, paste(x,c, sep="+"), sep="~")), data,
+                family=y_family)
+  
+  cde_mod <- glm(as.formula(paste(y, paste(x,m,c, sep="+"), sep="~")), data,
+                family=y_family)
+  
+  m_x_mod <- glm(as.formula(paste(m, paste(x,c, sep="+"), sep="~")), data,
+                family=m_family)
+  } # end else
+
+
+  # fill in estimates from functions
+  total_effect <- te_mod$coefficients[2]
+  cde <- cde_mod$coefficients[2]
+  nie <- m_x_mod$coefficients[2]*cde_mod$coefficients[3]
  
- total_effect <- glm(y~x, data, family=y_family)$coefficients[2]
- cde <- glm(y~x+m, data, family=y_family)$coefficients[2]
- nie <- (glm(m~x, data, family=m_family)$coefficients[2]*
-         glm(y~x+m, data, family=y_family)$coefficients[3])
- 
- estimates <- cbind(total_effect, cde, nie)
- return(estimates)
+  estimates <- cbind(total_effect, cde, nie)
+  return(estimates)
  
 }
 ```
@@ -162,11 +184,17 @@ mediation <- function(data, y, x, m, y_family, m_family){
 Testing mediation function.
 
 ```{r testing mediation funciton}
-# testing mediation function  
+# testing mediation function without covariate
 test <- mediation(sim_data,y="y", x="x", m="m", y_family="binomial",
                  m_family="gaussian")
 
 test
+
+# test with covariate
+test2 <- mediation(sim_data,y="y", x="x", m="m", c="c", y_family="binomial",
+                 m_family="gaussian")
+
+test2
 ```
 
 
@@ -175,7 +203,7 @@ Bootstrapped estimate terms. Median, 2.5 and 97.5 percentile should be good appr
 ```{r mediation boot}
 # booting 1000 times 
 boot_mediation <- sim_data %>% bootstrap(1000) %>% 
-  do(tidy(mediation(data=., y="y", x="x", m="m", y_family="binomial",
+  do(tidy(mediation(data=., y="y", x="x", m="m", c="c", y_family="poisson",
                  m_family="gaussian")))
 
 # estimates (empty matrix)
