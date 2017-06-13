@@ -173,8 +173,9 @@ mediation <- function(data, y, x, m, c, y_family, m_family){
   total_effect <- te_mod$coefficients[2]
   cde <- cde_mod$coefficients[2]
   nie <- m_x_mod$coefficients[2]*cde_mod$coefficients[3]
+  x_affect_on_m <- m_x_mod$coefficients[2]
  
-  estimates <- cbind(total_effect, cde, nie)
+  estimates <- cbind(total_effect, cde, x_affect_on_m, nie)
   return(estimates)
  
 }
@@ -208,7 +209,7 @@ boot_mediation <- sim_data %>% bootstrap(1000) %>%
                  m_family="gaussian")))
 
 # estimates (empty matrix)
-est <- matrix(NA, ncol=4, nrow=3) 
+est <- matrix(NA, ncol=4, nrow=4) 
 colnames(est) <- c("est", "median", "lower_95", "upper_95")
 
 # fill total effect values
@@ -228,6 +229,13 @@ est[3,1] <- "nie"
 est[3,2] <- round(exp(quantile(boot_mediation$nie, 0.5)),3)
 est[3,3] <- round(exp(quantile(boot_mediation$nie, 0.025)),3)
 est[3,4] <- round(exp(quantile(boot_mediation$nie, 0.975)),3)
+
+# fill m x relationship
+est[4,1] <- "x_m_association"
+est[4,2] <- round(exp(quantile(boot_mediation$x_affect_on_m, 0.5)),3)
+est[4,3] <- round(exp(quantile(boot_mediation$x_affect_on_m, 0.025)),3)
+est[4,4] <- round(exp(quantile(boot_mediation$x_affect_on_m, 0.975)),3)
+
 
 booted_estimates <- as_data_frame(est)
 
