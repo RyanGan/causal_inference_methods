@@ -173,9 +173,10 @@ mediation <- function(data, y, x, m, c, y_family, m_family){
   total_effect <- te_mod$coefficients[2]
   cde <- cde_mod$coefficients[2]
   nie <- m_x_mod$coefficients[2]*cde_mod$coefficients[3]
-  x_affect_on_m <- m_x_mod$coefficients[2]
+  y_on_m <- cde_mod$coefficients[3]
+  x_on_m <- m_x_mod$coefficients[2]
  
-  estimates <- cbind(total_effect, cde, x_affect_on_m, nie)
+  estimates <- cbind(total_effect, cde, nie, x_on_m, y_on_m)
   return(estimates)
  
 }
