@@ -1,0 +1,92 @@
+---
+title: "Categorical MSM"
+author: "Ryan_Gan"
+date: "June 7, 2017"
+output: html_document
+---
+
+```{r libraries, message=F}
+library(tidyverse) 
+library(broom) # for tidy model output and bootstrapping
+library(MSModelR) # my package for simple msm functions
+library(contrast)
+```
+
+## Simulated dataset
+
+Simulating a simple continous distribution and a linear relationship with binary outcome which I'll then break in to an ordinal catogory by tertiles. No confounding yet.
+
+```{r sim data}
+n <- 500
+set.seed(333)
+
+# create normal distribution of x with mean of 16 and sd of 4
+sim_data <- data_frame(x = rnorm(n, 16, 4)) %>% 
+  # simulate y data with linear logit relationship to x
+  mutate(y = rbinom(n, 1, 1/(1+exp(-(-1+0.10*x)))),
+         # split in to three categories
+         x_cat = ifelse(x < quantile(x,1/3), 0,
+                 ifelse(x > quantile(x,2/3), 2, 1)),
+         # dummy variable
+         x0 = ifelse(x_cat == 0, 1, 0),
+         x1 = ifelse(x_cat == 1, 1, 0),
+         x2 = ifelse(x_cat == 2, 1, 0),
+         x1_2 = ifelse(x_cat == 1 | x_cat == 2, 1, 0))
+```
+
+Truth.
+  
+```{r standard estimates}
+# check density plots of x category given x
+ggplot(sim_data, aes(x=x, fill=as.factor(x_cat))) +
+  geom_density(alpha = 0.5)
+
+
+# estimates good enough for example
+true_mod <- glm(y~x, sim_data, family="binomial"(link="logit"))
+tidy(true_mod)
+
+# plot predicted probability of the linear funciton
+pr_y_x <- predict(true_mod, sim_data, type="response")
+
+# plot of predicted probability of continous variable
+ggplot(sim_data, aes(x=x, y=pr_y_x)) +
+  geom_point()
+
+```
+
+Standard analysis asking what the risk ratio is strata to strata
+
+```{r risk ratio}
+# 2x3 table
+y_x <- xtabs(~x_cat+y, sim_data)
+pr_yx <- prop.table(y_x, 1)
+pr_yx
+# difference in risk from strata 2 to 1
+pr_yx[2,2] - pr_yx[1,2]
+# difference in risk from strata 3 to 1
+pr_yx[3,2] - pr_yx[1,2]
+# difference in risk from strata 3 to 2
+pr_yx[3,2] - pr_yx[2,2]
+
+# estimate risk ratio
+risk_ratio_mod <- glm(y~x1+x2, sim_data, family="binomial"(link="logit"))
+tidy(risk_ratio_mod)
+
+# comparing difference in x2 to x1
+risk_ratio_mod2 <- glm(y~x2+x0, sim_data, family="binomial"(link="logit"))
+tidy(risk_ratio_mod2)
+
+
+# treating the categorical variables as continous
+risk_ratio_mod3 <- glm(y~x_cat, sim_data, family="binomial"(link="logit"))
+tidy(risk_ratio_mod3)
+
+# now what if we combine groups x 3 and 2 together and compared against 1
+risk_ratio_mod4 <- glm(y~x1_2, sim_data,family="binomial"(link="logit"))
+tidy(risk_ratio_mod4)
+```
+
+Loss of information by combining the mid and high strata. But would this truly reflect a population effect where we may ask the question what if we reduced to background levels represented by strata 0? Something to think about.
+
+Trying out MSM estimates.
