@@ -1,0 +1,404 @@
+---
+title: "Reproducing Results in Snowden G-Comp Paper"
+author: "Ryan_Gan"
+date: "April 18, 2017"
+output: html_document
+---
+
+Using code from Snowden paper to try out MSM models and maybe test out SuperLearner and Target Maximum Likelihood packages.
+
+```{r libraries, message=F}
+library(tidyverse)
+library(broom)
+library(SuperLearner)
+library(tmle)
+```
+
+Simulating data as defined in the paper. Paper goes in to various model fits and how MSM estimates. First step of a marginal structral model is to define the I'm just going to go to example 4 where the appropriate interaction between A and W2 is specified.
+
+```{r simulate data}
+# sample size
+n <- 300
+set.seed(285)
+simdata <- data.frame(W1 = rbinom(n, 1, 0.4), W2 = rbinom(n, 1, 0.5))
+# add simulated data of A
+simdata <- transform(simdata, A = rbinom(n, 1, (0.5+0.2*W1-0.3*W2)))
+# add simulated data of Y
+simdata <- transform(simdata, Y = rnorm(n, (3-0.5*A+W1+0.3*A*W2), 0.4))
+
+# create counterfactual datasets 
+# A = 0
+simdata_a0 <- transform(simdata, A = 0)
+# A = 1
+simdata_a1 <- transform(simdata, A = 1)
+```
+
+## G-computation (simple substitution)
+
+Applying simple substitution method (g-computation). 
+
+*Step 1. Estimation of the conditional mean outcome Eo(Y|A,W,A:W2)*
+
+```{r gcomp step 1}
+# Step 1: Define Q formula
+reg_mod <- glm(Y~A+W1+A:W2, data = simdata, family = gaussian)
+summary(reg_mod)
+```
+
+*Step 2. Obtaining predicted outcomes under everyone exposed and no one exposured*
+
+Next we need to update the predicted FEV1 values where everyone is exposed and no one is exposed.
+
+```{r gcomp step 2}
+# Step 2: Updated predicted value
+# values of everyone exposed
+pr_fev_a1 <- predict(reg_mod, newdata = simdata_a1)
+# values of no one exposed
+pr_fev_a0 <- predict(reg_mod, newdata = simdata_a0)
+```
+
+*Step 3. Estimate the statistical parameter by substituting the predicted mean outcomes under everyone exposed and no one exposed*
+
+```{r gcomp step 3}
+mean(pr_fev_a1)
+mean(pr_fev_a0)
+# MSM value
+fev_est <- mean(pr_fev_a1) - mean(pr_fev_a0)
+fev_est
+```
+
+In order to get estimates of uncertainty around our MSM estimate ( 95% confidence invervals), we need to bootstrap.
+
+First I create a general function that calculates g-comp with a couple user-defined inputs.
+
+```{r gcomp function and bootstrap}
+# might be able to cut out y element of formula and add it to q_mod
+
+# create a g-comp function
+g_comp_func <- function(data, y, a, q_mod, mod_family, estimate){
+  # create a = 1 and a = 0 dataframes ----
+  a1_df <- a0_df <- data
+  a1_df[, a] <- 1
+  a0_df[, a] <- 0
+  # run q-formula ----
+  # may consider moving model specification outside of function
+    model <- glm(as.formula(paste(y, q_mod, sep = "~")), data = data, family = mod_family)
+     # calculate mean expected in a1 and a0
+      pr_a1 <- mean(predict(model, newdata = a1_df, type = "response")) 
+      pr_a0 <- mean(predict(model, newdata = a0_df, type = "response"))
+
+  # calculate desired estimates "diff", "ratio", "both" ----
+    # calculate difference a1 to a0
+    if(estimate == "diff"){
+      msm_diff <- pr_a1 - pr_a0
+      msm_val <- msm_diff
+    }
+    # calculate ratio of a1/a0
+    if(estimate == "ratio"){
+      msm_ratio <- pr_a1/pr_a0 
+      msm_val <- msm_ratio
+    } 
+    # output (i want to figure out how to assign it a name)
+      return(msm_val)
+      
+    # calculate both ratio and difference
+    # if(estimate == "both"){
+    #   msm_diff <- pr_a1 - pr_a0
+    #   msm_ratio <- pr_a1/pr_a0
+    #   msm_val <- rbind(c("Risk Difference", msm_diff),
+    #                    c("Risk Ratio", msm_ratio))
+    # }
+  
+} # end function
+```
+
+Testing function to see if it produces the same results.
+
+```{r gcomp func test}
+gcomp_est <- g_comp_func(data = simdata, y = "Y", a = "A", q_mod = "A+W1+A:W2",
+            mod_family = "gaussian", estimate = "diff")
+gcomp_est
+```
+
+Function works. Now we can feed it through broom's bootstrap function and calculation 95%CIs via percentile method.
+
+```{r gcomp boot}
+# percentile method with broom
+set.seed(321)
+boot_msm <- simdata %>% bootstrap(1000) %>% 
+  do(tidy(g_comp_func(data = ., y = "Y", a = "A", q_mod = "A+W1+A:W2",
+            mod_family = "gaussian", estimate = "diff")))
+
+# create empty matrix
+estimates <- matrix(nrow = 1, ncol = 4, byrow = T)
+colnames(estimates) <- c("msm_estimate", "boot_median", "lower_95", "upper_95")
+
+# fill matrix 
+estimates[,1] <- round(gcomp_est,3)
+estimates[,2] <- round(quantile(boot_msm$x, 0.5),3)
+estimates[,3] <- round(quantile(boot_msm$x, 0.025),3)
+estimates[,4] <- round(quantile(boot_msm$x, 0.975),3)
+
+# convert matrix to dataframe
+est_df <- data.frame(estimates)
+
+knitr::kable(est_df, caption = paste0("MSM estimates with bootstrapped 95%CI"))
+```
+
+## Inverse probability of treatment weight (IPTW)
+
+This method is similar to g-computation, but differs slightly in that confounding can be thought of as a problem of bias sampling where certain exposure-covariate subgroups are over or under represted compared to an RCT. IPTW up-weights under-represted subjects from exposure-covariate strata. Sounds like Bayesian nonsense.
+
+*Step 1. Estimate the propensity score Pr(A|W)*
+
+I'm actually interested to see how this will work since Snowden et al put an interesting interaction in. Maybe this was the point of their paper? Need to read it again on why they used g-comp over IPTW.
+
+```{r iptw step 1}
+prop_mod <- glm(A ~ W1 + W2, family = "binomial", data = simdata)
+summary(prop_mod)
+```
+
+*Step 2. Create weights*
+
+Multi-step process of creating weights for the probability of being exposed. We also check for ETA violations here where, given the covariates W, probability of exposed or unexposed might be >.90.
+
+IPTW requires the assumption of positivity or experimental treatment assignment where the observed treatment levels vary within confounder strata. Positivity violations occur when certain subgroups in a sample rarely or never receive some treatments of interest. The resulting sparsity in the data may increase bias with or without an increase in variance and can threaten valid inference. 
+
+```{r iptw step 2}
+# vector of propensity exposed for each observation
+prob_exposed <- predict(prop_mod, type = "response")
+# vector of propensity not exposed
+prob_unexposed <- 1 - prob_exposed 
+# histogram to check for ETA violation
+hist(prob_exposed)
+
+# create weights
+wt <- as.numeric(simdata$A == 1)/prob_exposed + 
+  as.numeric(simdata$A == 0)/prob_unexposed
+
+# checking to make sure we inverted probabilities correctly
+head(data.frame(simdata$Y, simdata$A, 1/prob_exposed, 1/prob_unexposed, wt))
+```
+
+*Step 3. Estimate statistical parameter*
+
+```{r iptw step 3}
+iptw <- mean(as.numeric(simdata$A==1)*wt*simdata$Y) -
+  mean(as.numeric(simdata$A==0)*wt*simdata$Y)
+
+iptw
+```
+
+Creating IPTW funciton to run through bootstrap.
+
+```{r iptw function}
+# inverse probability of treatment weighting function
+iptw_func <- function(data, y, a, w, estimate){
+  # step 1: estimate propensity of treatment ----
+    prop_mod <- glm(as.formula(paste(a, w, sep = "~")), data = data, 
+                    family = "binomial")
+  # step 2: estimate weights ----
+    # vector of propensity exposed for each observation
+    prob_exposed <- predict(prop_mod, type = "response")
+    # vector of propensity not exposed
+    prob_unexposed <- 1 - prob_exposed 
+    
+    # note: 4/20/17 can't quite figure out how to include a plot and value
+    # histogram to check for ETA violation 
+    # if(eta_plot == "yes"){ # plot probability of exposed
+    # eta_fig <- hist(prob_exposed)
+    #   }
+
+  # create weights
+    wt <- as.numeric(data[,a]==1)/prob_exposed + 
+          as.numeric(data[,a]==0)/prob_unexposed
+    
+  # calculate desired estimates "diff", "ratio", "both" ----
+    # calculate mean estimate
+    a1_est <- mean(as.numeric(data[,a]==1)*as.numeric(wt)*as.numeric(unlist(data[,y])))
+    a0_est <-  mean(as.numeric(data[,a]==0)*as.numeric(wt)*as.numeric(unlist(data[,y])))
+    # calculate difference a1 to a0
+    if(estimate == "diff"){
+      iptw_diff <- a1_est - a0_est
+      iptw_val <- iptw_diff
+    }
+    # calculate ratio of a1/a0
+    if(estimate == "ratio"){
+      iptw_ratio <- a1_est/a0_est
+      iptw_val <- iptw_ratio
+    } 
+    # output a list of figure and value
+    #iptw_out <- list(eta_fig, iptw_val)
+    return(iptw_val)
+} # end function 
+
+```
+
+Testing function. You can see that IPTW is slightly biased compared to the g-computation approach because it doesn't account for the interaction between A and W2 without the baseterm W2.
+
+```{r testing iptw function}
+iptw_est <- iptw_func(data=simdata, y="Y", a="A", w="W1+W2", estimate="diff")
+iptw_est
+```
+
+```{r iptw boot}
+# percentile method with broom
+set.seed(321)
+boot_iptw <- simdata %>% bootstrap(1000) %>% 
+  do(tidy(iptw_func(data=., y="Y", a="A", w="W1+W2", estimate="diff")))
+
+# create empty matrix
+estimates <- matrix(nrow = 1, ncol = 4, byrow = T)
+colnames(estimates) <- c("iptw_estimate", "boot_median", "lower_95", "upper_95")
+
+# fill matrix 
+estimates[,1] <- round(iptw_est,3)
+estimates[,2] <- round(quantile(boot_iptw$x, 0.5),3)
+estimates[,3] <- round(quantile(boot_iptw$x, 0.025),3)
+estimates[,4] <- round(quantile(boot_iptw$x, 0.975),3)
+
+# convert matrix to dataframe
+est_df <- data.frame(estimates)
+
+knitr::kable(est_df, caption = paste0("IPTW estimates with bootstrapped 95%CI"))
+```
+
+## Targeted Maximum Likelihood Substitution 
+
+This is a doubly robust estimation method that uses ensemble machine learning (via SuperLearner) to estimate both the Q function and treatment propensity. If even one of these  
+
+*Step 1: Estimate E(Y|A,W) using ensemble machine learning*
+
+```{r tmle q mod, message=F}
+# register superlearner library
+sl_lib <- c("SL.glm", "SL.glm.interaction", "SL.gam", "SL.nnet", 
+            "SL.randomForest", "SL.step")
+
+# estimate FEV/Y given the covariates
+sl_outcome_reg <- SuperLearner(Y=simdata$Y, X=subset(simdata, select = -Y),
+                    SL.library = sl_lib, family = "gaussian")
+# output of superlearner predictive algorithm
+sl_outcome_reg
+```
+
+SuperLearner is an esemble method that weights each machine learning algorithm used. The lower the risk, the better. The Coef variable shows the weight each model is contributing to the overall ensemble. GLM interaction contributes the most weight. We'd kind of hope that since we have that weird interaction between A and W2 without base contribution of W2.
+
+Now that we have esemble formula (which is hidden to my knowledge) to predict Y, we can updated our data.
+
+*Step 2. Use SuperLearner to estimate y where everyone is exposed and no one is exposed*
+
+```{r sl predict exp and unexp}
+# use predict function to obtain initial estimates of the expected outcome given the
+# observed exposure and covariates En(Y|A,W)
+expected_y_obsexp <- predict(sl_outcome_reg, newdata=simdata)$pred
+
+# like g-computation, we can also update the predicted probability where everyone is exposed
+expected_y_a1 <- predict(sl_outcome_reg, newdata=simdata_a1)$pred
+# and where no one is exposed
+expected_y_a0 <- predict(sl_outcome_reg, newdata=simdata_a0)$pred
+
+head(cbind(simdata, expected_y_obsexp, expected_y_a1, expected_y_a0))
+
+```
+
+*Step 3. Estimate MSM*
+
+```{r sl msm}
+tmle_msm <- mean(expected_y_a1) - mean(expected_y_a0)
+tmle_msm
+```
+
+Not bad for a machine. You can always add more machine learning methods and add crossvalidation to the ensemble, but that would increase computation time by quite a bit.
+
+## Doubly Robust Method
+
+This method also uses a machine learning ensemble method (SuperLearner) to not only predict the optimal Q model, but also the propensity of treatment model. This method has the advantage of being doubly robust, where if either the Q model or propensity of treatment model is correct, we will produce unbiased results. 
+
+*Steps 1. Same as TMLE substitution method where we define the Q model*
+
+I'm not going to go over this again since we just did this.
+
+*Step 2. Estimate propensity score using ensemble method*
+
+We follow a similar method to the IPTW framework, but now we can create a 'clever covariate'. For exposed subjects, the clever covariate is 1 over the predicted probability of being exposed, given baseline covariates. For unexposed subjects, the clever covariate is -1 over the predicted probablity of not being exposed, given the baseline covariates.
+
+```{r sl pscore}
+# estimate propensity score
+sl_pscore <- SuperLearner(Y=simdata$A, X=subset(simdata, select = -c(A,Y)),
+                  SL.library = sl_lib, family = "binomial")
+sl_pscore
+
+# predicted probability of beind exposed given baseline covariates
+expected_a1 <- sl_pscore$SL.predict
+# predicted probability of being unexposed given baseline covariates
+expected_a0 <- 1 - expected_a1
+
+# creation of clever covariate.
+clever_cov <- as.numeric(simdata$A==1)/expected_a1 -
+              as.numeric(simdata$A==0)/expected_a0
+
+# check to make sure clever covariate works
+clev_cov_a1 <- 1/expected_a1
+clev_cov_a0 <- -1/expected_a0
+
+head(data.frame(simdata$A, clever_cov, clev_cov_a1, clev_cov_a0))
+```
+
+*Step 3. Target intial estimator*
+
+Here we update the intial Q model with the clever covariate as an offset and supress the intercept.
+
+```{r tmle step 3}
+# offset needs to be qlogis for binary 
+# normal might not need anything since it's identity link?
+fev_mod_update <- glm(simdata$Y ~ -1 + offset(expected_y_obsexp) + 
+                        clever_cov, family = "gaussian")
+
+summary(fev_mod_update)
+
+# the clever covariate estimate on Y will become epsilon
+epsilon <- fev_mod_update$coefficients
+epsilon
+
+summary(glm(simdata$Y ~ clever_cov, family = "gaussian"))
+
+#pnorm(expected_y_obsexp)
+
+# estimated Y|A=1, W and Y|A=0, W
+tmle_y_a1 <- expected_y_a1+epsilon*clev_cov_a1
+tmle_y_a0 <- expected_y_a0+epsilon*clev_cov_a0
+```
+
+*Step 4. Substitute the updated fits into the target parameter*
+
+```{r doubly robust tmle step 4}
+tmle_dr_est <- mean(tmle_y_a1) - mean(tmle_y_a0)
+tmle_dr_est
+```
+
+### Comparison of all MSM estimate methods
+
+```{r comparsion}
+msm_fev <- cbind(gcomp_est, iptw_est, tmle_msm, tmle_dr_est)
+
+msm_fev
+```
+
+### TMLE Package
+
+Trying out the tmle package.
+
+```{r tmle package}
+set.seed(123)
+tmle_package_result <- tmle(Y = simdata$Y, A = simdata$A, 
+  W = subset(simdata, select = -c(A,Y)),
+  Q.SL.library = c("SL.nnet", "SL.glm", "SL.randomForest", "SL.step",
+        "SL.glm.interaction"), 
+  g.SL.library = c("SL.nnet", "SL.glm", "SL.randomForest", "SL.step",
+        "SL.glm.interaction"),  V = 10)
+
+tmle_package_result
+```
+
+Wow. This was much faster and produced 95% CIs. TMLE has it's own formla for calculating SE as described in package description in J of Stats Software. It tells me the same thing as the MSM bootstrapped method.
+
