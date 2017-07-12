@@ -1,0 +1,161 @@
+---
+title: "Introduction to Causal Inference Models"
+author: "Ryan Gan"
+date: "7/10/2017"
+output: slidy_presentation
+---
+
+## Setup
+
+I will use the tidyverse and broom package for this presentation.
+
+```{r setup, message=F, warning=F}
+library(tidyverse)
+library(broom)
+```
+
+## "Causal Inference" 
+
+If you've been to Society for Epidemiologic Research or any epi methods conference, you've probably heard something about "causal inference".
+
+You've also probably heard a lot of gibberish about g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust, targeted maximum likelihood, etc.
+
+And like me, you probably have no idea what any of those are, what they are used for, or even how to use them. But they are always referred to as being used in "causal inference", so these fancy-pants models must be special and the only way to find causal associations.
+
+This presentation provides a general overview of things I've learned about these methods. I'm still confused about a lot of this topic area (like how is the g-formula different from g-estimation?), but hopefully this will server as a primer.
+
+## Causal Inference Models
+
+These models help us answer the marginal effects of a binary exposure and help us deal with assessing the marginal effect of a binary exposure that varies over time, and is also confounded over time (original motivation of Robins). These methods can be applied to continous or binary outcomes, but only binary exposures.
+
+- Two general categories that have been around for a decade or so
+
+1. Structural nested models 
+- Commonly referred to as g-estimation, g-computation, g-formula, g-something
+- The g stands for "general"
+
+2. Marginal structural models 
+- Sometimes called inverse-probability-of-treatment weighting or IPTW
+
+- Newer approach in recent years are the doubly-robust method which we will touch on later
+
+## A Mostly Accurate History of Causal Models
+
+A long time ago (1920s), Jerzy Neyman proposed a class of statistical models that would latter be referred to as counter factual/potential outcomes models for randomized trials. Donald Rubin extended this framework to observational data and coined the term potential outcomes in maybe the 1970s?. Judea Pearl and Jamie Robins also did some stuff in the 80's. Jamie Robins introduced the g-formula and IPTW which were designed to estimate the marginal effect of a binary treatment that varied over time and was confounded by a time-varying confounder. Jamie Robins and a lot of his students have made some tweaks to the original framework which pretty much brings us to today.
+
+Anyways, a major process/step to most of these early models is the concept of the counter factual (which we'll cover in depth later in this presentation). 
+
+The general concept of the counter factual is it takes our "what if?" questions from implicit to explicit in our data.
+
+## Counterfactuals: Making Explicit Causal Claims
+
+- The randomized control trial (RCT): Our gold standard for assessing causal relationships. The basic study design has the investigators randomly assign a binary treatment to a population and follow the population over time to identify incident outcomes. Any potential confounding variables are distributed evenly among our treatment group, which creates d-separation/independence/no association between our confounding variables and our treatment. With this study design, we can estimate causal and unbiased effects between treatment and outcomes. 
+
+- What is implicit in this design is that the 'no' treatment group represents what would have happened to the 'yes' treatment group had they not been given the treatment.
+
+- Counter factual estimation makes this implicit assumption explicit.
+
+## Counterfactual Estimation is a Problem of Missing Data
+
+- The problem with any epidemiologic study design is that a subject's exposure (denoted as A) and outcome (denoted as Y) can be observed only once.
+
+```{r simple simulation}
+# set sample size and seed 
+n <- 5000; set.seed(777)
+# simulate exposure/treatment data with equal probability
+sim_data <- as_tibble((rbinom(n, 1, prob = 0.5))) %>% 
+  rename(A = value) %>% 
+  # simulate protective effect between A and Y
+  mutate(Y = rbinom(n, 1, 1/(1+exp(-(-2.5 + -0.6*A)))))
+# print first 6 observations
+head(sim_data)
+```
+
+- For example, our first subject has been treated and has not developed the outcome. 
+
+## Counterfactual Estimate using G-Computation 
+
+- G-computation is a way in which we can estimate the counter factual state where everyone is treated/exposed (denoted by a = 1) and no one is treated/exposed (denoted by a = 0)
+
+- G-computation is implemented in a 3-step process:
+
+*1. Estimation of the conditional mean outcome E(Y|A)*
+
+*2. Obtaining predicted outcomes under a = 1 and a = 0*
+
+*3. Estimate the statistical parameter (difference/ratio) by substituting the predicted mean outcomes under a = 1 and a = 0*
+
+## Estimation of the Conditional Mean Outcome E(Y|A)
+
+This can be estimated with your standard generalized linear model. We'll estimate the risk ratio, but risk difference can be estimated as well. 
+
+*2x2 Table*
+```{r 2x2}
+xtabs(~A + Y, sim_data)
+```
+
+*Risk Ratio of E(Y|A)*
+
+```{r ratio}
+# standard ratio model
+ratio_model <- glm(Y~A, sim_data, family = "binomial"(link="logit"))
+# ratio estimate
+exp(ratio_model$coefficients[2])
+```
+The treated group is 40% less likely to develop the outcome compared to the untreated group. 
+
+## Updating the Predicted Outcomes Under a = 1 
+
+First we duplicate our original dataframe and then set everyone's treatment to 1.
+
+```{r create a1 exposure dataframe}
+# set everyone to exposed from our original dataframe
+sim_data_a1 <- sim_data %>% mutate(A = 1)
+# view first 6 records
+head(sim_data_a1)
+```
+
+Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the dataframe where everyone receives treatment E(Y|a=1).
+
+```{r pr a1}
+# updated predicted probability of outcome 
+pr_a1 <- predict(ratio_model, newdata = sim_data_a1, type = "response")
+# average probability where everyone is exposed
+mean(pr_a1)
+```
+
+## Updating the Predicted Outcomes Under a = 0
+
+We repeat the same step under the scenario where no one is treated.
+
+```{r create a1 exposure dataframe}
+# set everyone to exposed from our original dataframe
+sim_data_a0 <- sim_data %>% mutate(A = 0)
+# view first 6 records
+head(sim_data_a0)
+```
+
+Updating our predicted probability under no treatment scenario E(Y|a=0).
+
+```{r pr a0}
+# updated predicted probability of outcome 
+pr_a0 <- predict(ratio_model, newdata = sim_data_a0, type = "response")
+# average probability where no one is exposed
+mean(pr_a0)
+```
+
+## Estimate the Counterfactual Parameter of Interest
+
+Now that we have a mean value for Y where everyone is treated and no one is treated, we can estimate our risk ratio.
+
+```{r g forumla ratio}
+mean(pr_a1)/mean(pr_a0)
+```
+
+Let's compare to our estimate using logistic regression again.
+
+```{r standard est result}
+exp(ratio_model$coefficients[2])
+```
+
+We get pretty much the same result. That was a lot of steps to get the same answer. 
