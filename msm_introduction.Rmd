@@ -28,16 +28,11 @@ This presentation provides a general overview of things I've learned about these
 
 These models help us answer the marginal effects of a binary exposure and help us deal with assessing the marginal effect of a binary exposure that varies over time, and is also confounded over time (original motivation of Robins). These methods can be applied to continous or binary outcomes, but only binary exposures.
 
-- Two general categories that have been around for a decade or so
+- Two general categories of commonly used causal inference methods
 
-1. Structural nested models 
-- Commonly referred to as g-estimation, g-computation, g-formula, g-something
-- The g stands for "general"
+1. Parametric g-formula (sometimes called simple substitution)
 
-2. Marginal structural models 
-- Sometimes called inverse-probability-of-treatment weighting (IPTW)
-
-- Newer approach in recent years are the doubly-robust method which we will touch on later
+2. Marginal structural models (Inverse-probability-of-treatment weighting [IPTW])
 
 ## A Brief History of Causal Models
 
@@ -148,7 +143,7 @@ Let's compare to our estimate using logistic regression again.
 exp(ratio_model$coefficients[2])
 ```
 
-We get pretty much the same result using the g-formula approach to a standard regression.
+We get pretty much the same result using the g-formula approach to a standard regression. However, we've now made our "what if?" question explicit and testable. 
 
 ## Counterfactual Estimate using IPTW
-
+Another commonly use method is the inverse-probability-of-treatment weight.
