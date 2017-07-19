@@ -26,7 +26,7 @@ This presentation provides a general overview of things I've learned about these
 
 ## Causal Inference Models
 
-These models help us answer the marginal effects of a binary exposure and help us deal with assessing the marginal effect of a binary exposure that varies over time, and is also confounded over time (original motivation of Robins). These methods can be applied to continous or binary outcomes, but only binary exposures.
+These models help us answer the marginal effects of a binary exposure and help us deal with assessing the marginal effect of a binary exposure that varies over time, and is also confounded over time (original motivation of Robins). These methods can be applied to continuous or binary outcomes, but only binary exposures.
 
 - Two general categories of commonly used causal inference methods
 
@@ -36,7 +36,7 @@ These models help us answer the marginal effects of a binary exposure and help u
 
 ## A Brief History of Causal Models
 
-A long time ago (1920s), in a country far far away (Poland), Jerzy Neyman proposed a class of statistical models that would latter be referred to as counter factual/potential outcomes models for randomized trials. Donald Rubin extended this framework to observational data and coined the term potential outcomes in maybe the 1970s?. Judea Pearl and Jamie Robins also did some stuff in the 80's. Jamie Robins introduced the g-formula and IPTW which were designed to estimate the marginal effect of a binary treatment that varied over time and was confounded by a time-varying confounder. Jamie Robins and a lot of his students have made some tweaks to the original framework which pretty much brings us to today.
+A long time ago (1920s), in a country far far away (Poland), Jerzy Neyman proposed a class of statistical models that would latter be referred to as counter factual/potential outcomes models for randomized trials. Donald Rubin extended this framework to observational data and coined the term potential outcomes in maybe the 1970s?. Judea Pearl and Jamie Robins also did some stuff in the 80's. Jamie Robins introduced the g-formula and IPTW which were designed to estimate the marginal effect of a binary treatment that varied over time and was confounded by a time-dependent confounded. Jamie Robins and a lot of his students have made some tweaks to the original framework which pretty much brings us to today.
 
 ## The Counterfactual
 
@@ -100,14 +100,14 @@ exp(ratio_model$coefficients[2])
 The treated group is 40% less likely to develop the outcome compared to the untreated group. 
 
 ## Updating the Predicted Outcomes Under a = 1 
-First we duplicate our original dataframe and then set everyone's treatment to 1.
+First we duplicate our original data frame and then set everyone's treatment to 1.
 ```{r create a1 exposure dataframe}
 # set everyone to exposed from our original dataframe
 sim_data_a1 <- sim_data %>% mutate(A = 1)
 # view first 6 records
 head(sim_data_a1)
 ```
-Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the dataframe where everyone receives treatment E(Y|a=1).
+Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the data frame where everyone receives treatment E(Y|a=1).
 ```{r pr a1}
 # updated predicted probability of outcome 
 pr_a1 <- predict(ratio_model, newdata = sim_data_a1, type = "response")
@@ -135,15 +135,159 @@ mean(pr_a0)
 Now that we have a mean value for Y where everyone is treated and no one is treated, we can estimate our risk ratio.
 ```{r g forumla ratio}
 # g formula ratio
-mean(pr_a1)/mean(pr_a0)
+round(mean(pr_a1)/mean(pr_a0),2)
 ```
 Let's compare to our estimate using logistic regression again.
 ```{r standard est result}
 # odds ratio (approximates risk ratio due to rare disease assumption)
-exp(ratio_model$coefficients[2])
+round(exp(ratio_model$coefficients[2]),2)
 ```
 
-We get pretty much the same result using the g-formula approach to a standard regression. However, we've now made our "what if?" question explicit and testable. 
+We get pretty much the same result using the g-formula approach to a standard regression. The reason for the difference is that I'd normally use some type of Poisson model to estimate a risk ratio, but I used a logistic model to estimate the predicted probability.
+
+However, the important thing is that we've now made our "what if?" question explicit and testable. 
 
 ## Counterfactual Estimate using IPTW
-Another commonly use method is the inverse-probability-of-treatment weight.
+Another commonly use method is the inverse-probability-of-treatment weight.This is probably the most common marginal structural models (MSMs) methods used in practice today.
+
+With IPTW estimation, confounding can be thought of as a problem of bias sampling where certain exposure-covariate subgroups are over or under represented compared to an randomized control trail. IPTW up-weights under-represented subjects from exposure-covariate strata. 
+
+## Counterfactual Estimation using IPTW
+Steps to counter factual estimation are as follows:
+
+*1. Estimate the propensity score Pr(A|W)*
+
+*2. Create weights*
+
+*3. Estimate statistical parameter*
+
+## Estimation of the Propensity of Pr(A)
+
+Much like g-computation, our first step involves a standard regression model. However, unlike g-computation, the first step is to estimate the probability of treatment/exposure (A), given any potential covariates/confounders. Since we don't have any simulated confounders, we'll just estimate the probability of treatment (which should be pretty close to 0.5 based on our simulation)
+
+```{r iptw step 1}
+prop.table(xtabs(~A, sim_data))
+# intercept only model since we don't have covariates
+prop_mod <- glm(A ~ 1, family = "binomial", data = sim_data)
+```
+
+## Estimating Probability of A = 1 and A = 0 
+
+IPTW requires the assumption of positivity or experimental treatment assignment (ETA) where the observed treatment levels vary within confounded strata. Positivity violations occur when certain subgroups in a sample rarely or never (or almost always) receive some treatments of interest. The resulting sparsity in the data may increase bias with or without an increase in variance and can threaten valid inference. 
+
+Before we create the weights, we first need to see if we have an ETA violation. Since these are simulated data and there are no factors that affect treatment probability, there won't be. The histogram doesn't make sense in this case, so I"m commenting it out.
+
+```{r iptw step 2.1}
+# vector of propensity exposed for each observation
+prob_exposed <- predict(prop_mod, type = "response")
+# vector of propensity not exposed
+prob_unexposed <- 1 - prob_exposed 
+# histogram to check for ETA violation
+#hist(prob_exposed)
+```
+
+## Creating Weights 
+The weight (wt) is simply 1 over the probability of being exposed or unexposed. For those who were exposed, we assign wt as 1/pr(A=1). For unexposed, we assign wt as 1/pr(A=0)
+
+```{r iptw step 2.2}
+# create weights
+wt <- as.numeric(sim_data$A == 1)/prob_exposed + 
+  as.numeric(sim_data$A == 0)/prob_unexposed
+
+# checking to make sure we inverted probabilities correctly
+head(data.frame(sim_data$Y, sim_data$A, 1/prob_exposed, 1/prob_unexposed, wt))
+```
+
+## Estimating the Statistical Parameter
+
+Now that we have the weights, we take all the subjects where A=1, multiply the weight and outcome and divide that by all the subjects where A=0 multiplied by the weights and outcome.
+
+```{r iptw step 3}
+iptw <- mean(as.numeric(sim_data$A==1)*wt*sim_data$Y)/
+  mean(as.numeric(sim_data$A==0)*wt*sim_data$Y)
+# estimate
+round(iptw,2)
+```
+
+I'm not sure this is a counter factual estimate, but it is considered a causal estimate. Note: may revise all slides to focus on "causal inference methods" rather than counter factual.
+
+## What's the Point?
+You've probably thought that this is a lot of work to arrive at the same point estimate that can be estimated with a line of code. 
+
+Also, you've probably noticed that we haven't estimated any sort of inferential statistics like confidence intervals. Both g-computation and IPTW don't have empirical variance formulas (to my knowledge), therefore confidence intervals need to be estimated by bootstrapping or other sandwich approximations.
+
+There are two scenarios where these 'causal' estimates will differ from standard regression approaches.
+
+1. The estimation of treatment on outcome that is confounded by a time-dependent factor.
+
+2. The estimation of treatment on outcome in the presence of interaction.
+
+## Causal Estimates when A is Under the Influence of a Time-Dependent Confounder
+
+The g-computation and IPTW can be used to give a marginal estimate of the effect of a binary exposure/treatment (A) on an outcome (Y) when A is administered at multiple time points. Further, A at time 0 influence a third factor Z, and that factor in turn influences A at time 1. Thus, our A and Y association is confounded by a time-dependent factor (Z). 
+
+This is a little confusing, so we'll show an example. I'm going to use the example from Naimi et al. 2017, *An introduction to g methods*. It's a nicely written paper for those new to these causal inference methods and it also has SAS code for SAS users.
+
+
+## Simulating Example Shown in Naimi 2017
+The Naimi paper uses the SAS cards statement to provide strata estimates. I've simulated a nearly identical data frame (code hidden due to size).
+
+```{r time dependent Z sim data, echo=F}
+# hiding simulation since it takes up a lot of space
+# i'm sure there is a better way to simulate this, but eh
+# simulating table 1 (kind of)
+set.seed(123)
+strata1 <- tibble(obs = 1:209271) %>%
+  mutate(strata = 1, A0 = 0, Z1 = 0, A1 = 0, 
+    # i'm simulating a little variance around the value provided by Naimi
+    Y = rnorm(n = 209271, mean = 87.29, sd = 10))
+
+strata2 <- tibble(obs = 1:93779) %>% 
+  mutate(strata = 2, A0 = 0, Z1 = 0, A1 = 1, 
+    Y = rnorm(n = 93779, mean = 112.11, sd = 12))
+
+strata3 <- tibble(obs = 1:60654) %>%
+  mutate(strata = 3, A0 = 0, Z1 = 1, A1 = 0, 
+    Y = rnorm(n = 60654, mean = 119.65, sd = 16))
+
+strata4 <- tibble(obs = 1:136293) %>%
+  mutate(strata = 4, A0 = 0, Z1 = 1, A1 = 1, 
+    Y = rnorm(n = 136293, mean = 144.84, sd = 10))
+
+strata5 <- tibble(obs = 1:134781) %>%
+  mutate(strata = 5, A0 = 1, Z1 = 0, A1 = 0, 
+    Y = rnorm(n = 134781, mean = 105.28, sd = 14))
+
+strata6 <- tibble(obs = 1:60789) %>%
+  mutate(strata = 6, A0 = 1, Z1 = 0, A1 = 1, 
+    Y = rnorm(n = 60789, mean = 130.18, sd = 11))
+
+strata7 <- tibble(obs = 1:93903) %>%
+  mutate(strata = 7, A0 = 1, Z1 = 1, A1 = 0, 
+    Y = rnorm(n = 93903, mean = 137.72, sd = 14))
+
+strata8 <- tibble(obs = 1:210527) %>%
+  mutate(strata = 8, A0 = 1, Z1 = 1, A1 = 1, 
+    Y = rnorm(n = 210527, mean = 162.83, sd = 9))
+
+# bind all in to one dataset
+td_sim_data <- rbind(strata1, strata2, strata3, strata4, strata5, strata6, 
+                     strata7, strata8)
+# remove to save room
+rm(strata1, strata2, strata3, strata4, strata5, strata6, strata7, strata8)
+```
+
+Summary statistics for the simulated dataframe that approximate table 1 in Naimi.
+```{r summary td data frame}
+summary_td_sim_data <- td_sim_data %>% group_by(strata) %>% 
+  summarise(A0 = mean(A0), Z1 = mean(Z1), A1 = mean(A1), Y = mean(Y),
+            N = n())
+
+summary_td_sim_data
+```
+
+
+A benefit of these approaches over standard regression analyses is that they can provide estimates of the marginal effect of A on Y in the presence of interaction with A.
+
+
+
