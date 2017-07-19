@@ -286,6 +286,15 @@ summary_td_sim_data <- td_sim_data %>% group_by(strata) %>%
 summary_td_sim_data
 ```
 
+Now that we have our simulated data, we'll replicate the results Naimi et al.
+of marginal (overall) effect of HIV treatment on CD4 count.
+
+To make things easier, let's load some functions I've made for g-computation and IPTW.
+
+```{r}
+devtools::install_github("RyanGan/MSModelR")
+```
+
 
 A benefit of these approaches over standard regression analyses is that they can provide estimates of the marginal effect of A on Y in the presence of interaction with A.
 
