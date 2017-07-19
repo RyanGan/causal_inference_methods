@@ -223,6 +223,7 @@ There are two scenarios where these 'causal' estimates will differ from standard
 2. The estimation of treatment on outcome in the presence of interaction.
 
 ## Causal Estimates when A is Under the Influence of a Time-Dependent Confounder
+Note I can't figure out how to estimate these values yet so I may cut it out for now.
 
 The g-computation and IPTW can be used to give a marginal estimate of the effect of a binary exposure/treatment (A) on an outcome (Y) when A is administered at multiple time points. Further, A at time 0 influence a third factor Z, and that factor in turn influences A at time 1. Thus, our A and Y association is confounded by a time-dependent factor (Z). 
 
@@ -288,9 +289,26 @@ summary_td_sim_data
 
 Standard regression estimate.
 
-```{r time dependent std regression}
-std_td_mod <- glm(Y~A0 + A1 + A0*A1, family = "gaussian", data = td_sim_data)
+```{r time dependent std regression, echo = F}
+std_est_table <- as_tibble(matrix(NA, nrow = 6, ncol = 2))
+colnames(std_est_table) <- c("model_params","a_estimate")
 
+# generate a vector of formulas to estimate and fill first column
+std_est_table[,1] <- formula_vector <- c("Y~A0+A1+A0*A1", "Y~A0+A1+A0*A1+Z1", 
+  "Y~A0", "Y~A0+Z1", "Y~A1", "Y~A1+Z1")
+
+# for loop to estimate standard regression estimates
+for(i in 1:6){
+  x <- formula_vector[i]
+  mod <- lm(as.formula(x), data=td_sim_data)
+  std_est_table[i,2] <- round(sum(mod$coefficients[
+    # subset only A0, A1, or A0*A1
+    names(mod$coefficients)=="A0" | names(mod$coefficients)=="A1" |
+    names(mod$coefficients)=="A0*A1"]),1) 
+}
+
+knitr::kable(std_est_table, 
+  caption = "Standard regression estimates of average effect of A on Y")
 ```
 
 Now that we have our simulated data, we'll replicate the results Naimi et al.
@@ -301,10 +319,18 @@ To make things easier, let's load some functions I've made for g-computation and
 ```{r}
 # install custom package MSModelR
 # devtools::install_github("RyanGan/MSModelR")
-
 # load library
 library(MSModelR)
+
+test <- g.formula(data = td_sim_data, y = "Y", a = c("A0"), model.family = "gaussian",
+                  q.model = "A0+A1+A0*A1+Z1", estimate = "diff")
+
+
+iptw(data=td_sim_data, y = "Y", a = "A1", w = "Z1", estimate = "diff")
+
+?iptw
 ```
+
 
 
 
