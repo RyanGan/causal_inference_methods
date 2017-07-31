@@ -314,6 +314,35 @@ knitr::kable(std_est_table,
 Now that we have our simulated data, we'll replicate the results Naimi et al.
 of marginal (overall) effect of HIV treatment on CD4 count.
 
+Trying to replicate example in sas code.
+```{r}
+y_mod <- glm(Y ~ A1 + Z1 + A0 + A1*A0, data = td_sim_data, family = "gaussian")
+z1_mod <- glm(Z1 ~ A0, data = td_sim_data, family = "binomial"(link="logit"))
+a1_mod <- glm(A1 ~ Z1, data = td_sim_data, family = "binomial"(link="logit")) 
+
+
+# natural course estimate
+nc_mu <- mean(predict(y_mod, newdata = td_sim_data, type = "response"))
+
+# fully exposed
+z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 1), type = "response"))
+# simulate vector of new Z1 values accounting for prior A0
+z1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), z1_pr)==T,1,0)
+# update a1 
+a1_pr <- mean(predict(a1_mod, newdata = as.tibble(z1_vec), type = "response"))
+# simulate new a1 given z1 under a0 estimate
+a1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), a1_pr)==T,1,0)
+
+all_exposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, A1 = 1, A0 = 1, Z1 = z1_vec),
+                type = "response"))
+
+
+
+head(mutate(td_sim_data, A1 = 1, A0 = 1))
+
+MSModelR::g.formula
+```
+
 To make things easier, let's load some functions I've made for g-computation and IPTW.
 
 ```{r}
