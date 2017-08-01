@@ -314,8 +314,9 @@ knitr::kable(std_est_table,
 Now that we have our simulated data, we'll replicate the results Naimi et al.
 of marginal (overall) effect of HIV treatment on CD4 count.
 
-Trying to replicate example in sas code.
+Trying to replicate simple substitution example in sas code.
 ```{r}
+# g formula
 y_mod <- glm(Y ~ A1 + Z1 + A0 + A1*A0, data = td_sim_data, family = "gaussian")
 z1_mod <- glm(Z1 ~ A0, data = td_sim_data, family = "binomial"(link="logit"))
 a1_mod <- glm(A1 ~ Z1, data = td_sim_data, family = "binomial"(link="logit")) 
@@ -324,7 +325,8 @@ a1_mod <- glm(A1 ~ Z1, data = td_sim_data, family = "binomial"(link="logit"))
 nc_mu <- mean(predict(y_mod, newdata = td_sim_data, type = "response"))
 
 # fully exposed ----
-z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 1), type = "response"))
+z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 1), 
+                      type = "response"))
 # simulate vector of new Z1 values accounting for prior A0
 z1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), z1_pr)==T,1,0)
 
@@ -334,18 +336,66 @@ a1_pr <- mean(predict(a1_mod, newdata = mutate(td_sim_data, Z1 = z1_vec),
 # simulate new a1 given z1 under a0 estimate
 a1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), a1_pr)==T,1,0)
 # update predicted Y where everyone is exposed at time 0 and 1, and accounting for Z1 | A0 =1 
-all_exposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, A1 = 1, A0 = 1, Z1 = z1_vec),
-                type = "response"))
+all_exposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, 
+                A1 = 1, A0 = 1, Z1 = z1_vec), type = "response"))
 all_exposed
 
 # unexposed
-z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 0), type = "response"))
+z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 0), 
+          type = "response"))
 z1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), z1_pr)==T,1,0)
-all_unexposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, A1 = 0, A0 = 0, Z1 = z1_vec),
-                type = "response"))
+all_unexposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, 
+                  A1 = 0, A0 = 0, Z1 = z1_vec), type = "response"))
 all_unexposed
 # diff
 all_exposed - all_unexposed
+
+# creating a formula. will need dplyr
+g.formula.td <- function(data, y, a0, a1, z1, y.model, y.family,
+  a1.model, a1.family, z1.model, z1.family, estimate = "diff"){
+  
+  un_exp_df <- exp_df <- data
+  un_exp_df[,c(a0,a1)] <- 0
+  exp_df[, c(a0,a1)] <- 1
+  
+  # define y.model
+  q_mod <- glm(as.formula(paste(y, y.model, sep = "~")), data = data, 
+    family = y.family)
+  # define z1.model
+  z1_mod <- glm(as.formula(paste(z1, z1.model, sep = "~")), data = data, 
+    family = z1.family)
+  # define a1.model
+  a1_mod <- glm(as.formula(paste(a1, a1.model, sep = "~")), data = data, 
+              family = a1.family) 
+  # updated probability of z1 given a0 = 1
+  z1_exp_pr <- mean(predict(z1_mod, newdata = exp_df, type = "response"))
+  # simulate vector of new Z1 values accounting for prior A0 where everyone is exposed
+  z1_exp_vec <- as.numeric(ifelse(rbinom(n = nrow(data),size = 1 , z1_exp_pr)==T,1,0))
+  # update z value under a0=1 scenario
+  exp_df[,z1] <- z1_exp_vec
+  # update y estimate as if everyone was exposed
+  y_exp <- mean(predict(y_mod,newdata=exp_df,type = "response"))
+  
+  # updated probability of z1 given a0 = 0
+  z1_unexp_pr <- mean(predict(z1_mod, newdata = un_exp_df, type = "response"))
+  # simualte vector of new Z1 values accounting for prior A0 where everyone is unexposed
+  z1_unexp_vec <- as.numeric(ifelse(rbinom(n = nrow(data), size = 1, z1_unexp_pr)==T,1,0))
+  un_exp_df[,z1] <- z1_unexp_vec
+  # udpate y estimates as if everyone was unexposed
+  y_unexp <- mean(predict(y_mod,newdata=un_exp_df,type = "response"))
+  
+  if(estimate == "diff"){ 
+    msm_estimate <- y_exp - y_unexp
+    }
+  if(estimate == "ratio"){
+    msm_estimate <- y_exp/y_unexp
+  }
+  return(msm_estimate)
+  }
+
+g.formula.td(data = td_sim_data, y = "Y", a0 = "A0", a1= "A1", z1 = "Z1",
+  y.model = "A0+A1+Z1+A0*A1", y.family = "gaussian", a1.model = "Z1", 
+  a1.family = "binomial", z1.model = "A0", z1.family = "binomial", estimate = "diff")
 
 ```
 
