@@ -399,6 +399,16 @@ g.formula.td(data = td_sim_data, y = "Y", a0 = "A0", a1= "A1", z1 = "Z1",
 
 ```
 
+```{r iptw td}
+MSModelR::iptw
+
+# define propensity models (intercept only model without covariates)
+pr_a0_mod <- glm(A0 ~ 1, data = td_sim_data, family="binomial")
+# probability of being treated at time 1
+pr_a0 <- mean(predict(pr_a0_mod, type = "response"))
+# pr a1 | stuff
+
+```
 To make things easier, let's load some functions I've made for g-computation and IPTW.
 
 ```{r}
