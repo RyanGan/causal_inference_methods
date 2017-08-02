@@ -1,8 +1,10 @@
 ---
-title: "Introduction to Causal Inference Models"
+title: "Introduction to Marginal Structural Models"
 author: "Ryan Gan"
 date: "7/10/2017"
-output: slidy_presentation
+output: 
+  slidy_presentation:
+    incremental: true
 ---
 
 ## Setup
@@ -14,52 +16,93 @@ library(tidyverse)
 library(broom)
 ```
 
-## "Causal Inference" 
+## Causal inference 
 
-Causal inference methods are very popular (particularly with methods epidemiologists)
+- Causal inference methods are growing in popularity (particularly among the epidemiology methodologists)
 
-Terms associated with thesee methods include: DAGs, g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust estimation, targeted maximum likelihood, etc.
+- Terms associated with thesee methods include: DAGs, counterfactual, potential outcomes, g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust estimation, targeted maximum likelihood, etc.
 
-This presentation provides an introduction to two of the more common of these methods. 
+- Jargon around this field makes these methods intimidating
+
+- This presentation will focus on marginal structural models (MSMs) and provide an introduction to two of the more common of these methods. 
 
 ## What's the big deal about causal inference methods?
- 
- - 
 
+- Another tool/skillset to help evaluate causal relationships
 
-## Causal Inference Models
+- Emphasis mostly placed on the analysis of data 
 
-These models help us answer the marginal effects of a binary exposure and help us deal with assessing the marginal effect of a binary exposure that varies over time, and is also confounded over time (original motivation of Robins). These methods can be applied to continuous or binary outcomes, but only binary exposures.
+- Causal inference language is different from statistical language (i.e. X affecting Y vs. X correlated with Y) although we may run the exact same statistical test to assess
 
-- Two general categories of commonly used causal inference methods
+## Three main methods you'll hear about
+
+1. Directed Acyclic Graphs (DAGs): help to understand potential relationships between variables (i.e. potential collider and confounding bias)and how data may have been generated (i.e. temporal sequence exposure affects outcome)
+
+2. Counterfactual/potential outcomes: makes explicit the "what if?" scenario 
+
+3. MSMs provide consistent estimates of differences or ratios of average (marginal) potential outcomes with less restrictions compared to standard regression methods (we'll return to this when we talk about time-dependent confounding)
+
+- Keep in mind your training in standard regression and this will make more sense!
+
+## What is a counter factual?
+
+- Randomized control trial: randomly assign exposure and no exposure to two groups and follow them over time to see which group is more likely to develop the outcome 
+
+- What is implicit in this design is that the 'no exposure' group represents what would have happened to the 'exposure' group
+
+- A missing data problem: a subject's exposure and outcome can be observed only once 
+
+- The counter factual solves our missing data problem and takes our "what if?" questions from implicit to explicit in our analysis of data
+
+- You will also see this called potential outcomes framework in some circles (economists)
+
+## Marginal Structural Models (MSMs)
+
+- Uses the pricinipal of the counter factual and allows us to estimate an unbiased and consistent effect,under a less-restrictive set of assumptions:
+
+1. Counterfactual consistency
+
+2. Exchangebility
+
+3. Positivity
+
+## Counterfactual consistency
+
+- Allows us to equate observed outcomes for a given exposure value to the potential outcomes that would be observed under the same exposure value.
+
+- This assumption depends on exposure assignment mechanism (i.e. RCT)
+
+## Exchangeability
+
+- Potential outcome under exposure a~0~ and a~1~ are independent of the observed exposures A~0~ and A~1~
+
+- Can be tested emprically
+
+- Easier to understand as being able to exchange exposure groups and observing the same distribution of the outcome
+
+- Conditional exchangeability happens when there is no unmeasured confounding
+
+## Positivity 
+
+- Probability of exposure is not 0 or 1
+
+- Can be emprically evaluated to make sure there are exposed and unexposed individuals within each confounder strata and prior exposure levels
+
+## Two commonly used MSMs 
+
+While there are more classes of MSMs we'll cover the most basic two
 
 1. Parametric g-formula (sometimes called simple substitution)
 
-2. Marginal structural models (Inverse-probability-of-treatment weighting [IPTW])
+2. Inverse-probability-of-treatment weighting (IPTW)
 
-## A Brief History of Causal Models
 
-A long time ago (1920s), in a country far far away (Poland), Jerzy Neyman proposed a class of statistical models that would latter be referred to as counter factual/potential outcomes models for randomized trials. Donald Rubin extended this framework to observational data and coined the term potential outcomes in maybe the 1970s?. Judea Pearl and Jamie Robins also did some stuff in the 80's. Jamie Robins introduced the g-formula and IPTW which were designed to estimate the marginal effect of a binary treatment that varied over time and was confounded by a time-dependent confounded. Jamie Robins and a lot of his students have made some tweaks to the original framework which pretty much brings us to today.
+## Simulated data
 
-## The Counterfactual
+I've simulated a simple example data frame with a known relationship to show you how to implement these two methods
 
-- A major process/step to most of these early models is the concept of the counter factual (which we'll cover in depth later in this presentation). 
-
-- The general concept of the counter factual is it takes our "what if?" questions from implicit to explicit in our data.
-
-## Counterfactuals: Making Explicit Causal Claims
-
-- The randomized control trial (RCT): Our gold standard for assessing causal relationships. The basic study design has the investigators randomly assign a binary treatment to a population and follow the population over time to identify incident outcomes. Any potential confounding variables are distributed evenly among our treatment group, which creates d-separation/independence/no association between our confounding variables and our treatment. With this study design, we can estimate causal and unbiased effects between treatment and outcomes. 
-
-- What is implicit in this design is that the 'no' treatment group represents what would have happened to the 'yes' treatment group had they not been given the treatment.
-
-- Counter factual estimation makes this implicit assumption explicit.
-
-## Counterfactual Estimation is a Problem of Missing Data
-
-- The problem with any epidemiologic study design is that a subject's exposure (denoted as A) and outcome (denoted as Y) can be observed only once.
-
-```{r simple simulation}
+Simulate code is hidden, but here are the first 6 observations and a 2x2 table
+```{r simple simulation, echo=FALSE}
 # set sample size and seed 
 n <- 5000; set.seed(777)
 # simulate exposure/treatment data with equal probability
@@ -69,48 +112,46 @@ sim_data <- as_tibble((rbinom(n, 1, prob = 0.5))) %>%
   mutate(Y = rbinom(n, 1, 1/(1+exp(-(-2.5 + -0.6*A)))))
 # print first 6 observations
 head(sim_data)
+#2x2 table
+xtabs(~A + Y, sim_data)
 ```
 
-- For example, our first subject has been treated and has not developed the outcome. 
+## MSM using g-computation 
 
-## Counterfactual Estimate using G-Computation 
+- G-computation is a way in which we can estimate the counter factual state where everyone is treated/exposed (denoted by a = 1) and no one is treated/exposed (denoted by a = 0) and is implemented in a 3-step process:
 
-- G-computation is a way in which we can estimate the counter factual state where everyone is treated/exposed (denoted by a = 1) and no one is treated/exposed (denoted by a = 0)
+1. Estimation of the conditional mean outcome E(Y|A)
 
-- G-computation is implemented in a 3-step process:
+2. Obtaining predicted potential outcomes under a = 1 and a = 0
 
-*1. Estimation of the conditional mean outcome E(Y|A)*
+3. Estimate the statistical parameter (difference/ratio) by substituting the predicted mean outcomes under a=1 and a=0
 
-*2. Obtaining predicted outcomes under a = 1 and a = 0*
-
-*3. Estimate the statistical parameter (difference/ratio) by substituting the predicted mean outcomes under a=1 and a=0*
-
-## Estimation of the Conditional Mean Outcome E(Y|A)
+## Estimation of the conditional mean outcome E(Y|A)
 
 This can be estimated with your standard generalized linear model. We'll estimate the risk ratio, but risk difference can be estimated as well. 
 
-*2x2 Table*
-```{r 2x2}
-xtabs(~A + Y, sim_data)
-```
 *Risk Ratio of E(Y|A)*
-```{r ratio}
+```{r risk ratio}
 # standard ratio model
 ratio_model <- glm(Y~A, sim_data, family = "binomial"(link="logit"))
 # ratio estimate
-exp(ratio_model$coefficients[2])
+round(exp(ratio_model$coefficients[2]),2)
 ```
-The treated group is 40% less likely to develop the outcome compared to the untreated group. 
+The treated group is 40% less likely to develop the outcome compared to the untreated group 
 
-## Updating the Predicted Outcomes Under a = 1 
-First we duplicate our original data frame and then set everyone's treatment to 1.
+## Updating the predicted outcomes under a=1 
+
+First we duplicate our original data frame and then set everyone's exposure to 1
+
 ```{r create a1 exposure dataframe}
 # set everyone to exposed from our original dataframe
 sim_data_a1 <- sim_data %>% mutate(A = 1)
 # view first 6 records
 head(sim_data_a1)
 ```
-Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the data frame where everyone receives treatment E(Y|a=1).
+
+Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the data frame where everyone receives exposure E(Y|a=1)
+
 ```{r pr a1}
 # updated predicted probability of outcome 
 pr_a1 <- predict(ratio_model, newdata = sim_data_a1, type = "response")
@@ -118,7 +159,8 @@ pr_a1 <- predict(ratio_model, newdata = sim_data_a1, type = "response")
 mean(pr_a1)
 ```
 
-## Updating the Predicted Outcomes Under a = 0
+## Updating the predicted outcomes under a=0
+
 We repeat the same step under the scenario where no one is treated.
 ```{r create a0 exposure dataframe}
 # set everyone to exposed from our original dataframe
@@ -126,7 +168,7 @@ sim_data_a0 <- sim_data %>% mutate(A = 0)
 # view first 6 records
 head(sim_data_a0)
 ```
-Updating our predicted probability under no treatment scenario E(Y|a=0).
+Updating our predicted probability under no exposure scenario E(Y|a=0).
 ```{r pr a0}
 # updated predicted probability of outcome 
 pr_a0 <- predict(ratio_model, newdata = sim_data_a0, type = "response")
@@ -134,7 +176,8 @@ pr_a0 <- predict(ratio_model, newdata = sim_data_a0, type = "response")
 mean(pr_a0)
 ```
 
-## Estimate the Counterfactual Parameter of Interest
+## Estimate the counterfactual parameter of interest
+
 Now that we have a mean value for Y where everyone is treated and no one is treated, we can estimate our risk ratio.
 ```{r g forumla ratio}
 # g formula ratio
@@ -146,39 +189,43 @@ Let's compare to our estimate using logistic regression again.
 round(exp(ratio_model$coefficients[2]),2)
 ```
 
-We get pretty much the same result using the g-formula approach to a standard regression. The reason for the difference is that I'd normally use some type of Poisson model to estimate a risk ratio, but I used a logistic model to estimate the predicted probability.
+We get pretty much the same result using the g-formula approach to a standard regression. 
 
 However, the important thing is that we've now made our "what if?" question explicit and testable. 
 
-## Counterfactual Estimate using IPTW
-Another commonly use method is the inverse-probability-of-treatment weight.This is probably the most common marginal structural models (MSMs) methods used in practice today.
+## MSM via IPTW
+
+Another commonly use method is the inverse-probability-of-treatment weight.This is probably the most common marginal structural models (MSMs) methods used in practice today because it's easier to implement
 
 With IPTW estimation, confounding can be thought of as a problem of bias sampling where certain exposure-covariate subgroups are over or under represented compared to an randomized control trail. IPTW up-weights under-represented subjects from exposure-covariate strata. 
 
-## Counterfactual Estimation using IPTW
-Steps to counter factual estimation are as follows:
+## IPTW steps
 
-*1. Estimate the propensity score Pr(A|W)*
+1. Estimate the propensity score Pr(A|W)
 
-*2. Create weights*
+2. Create weights
 
-*3. Estimate statistical parameter*
+3. Estimate statistical parameter
 
-## Estimation of the Propensity of Pr(A)
+## Estimation of the propensity of Pr(A)
 
-Much like g-computation, our first step involves a standard regression model. However, unlike g-computation, the first step is to estimate the probability of treatment/exposure (A), given any potential covariates/confounders. Since we don't have any simulated confounders, we'll just estimate the probability of treatment (which should be pretty close to 0.5 based on our simulation)
+Much like g-computation, our first step involves a standard regression model. However, unlike g-computation, the first step is to estimate the probability of treatment/exposure (A).
 
 ```{r iptw step 1}
-prop.table(xtabs(~A, sim_data))
 # intercept only model since we don't have covariates
 prop_mod <- glm(A ~ 1, family = "binomial", data = sim_data)
+# summary of model
 ```
 
-## Estimating Probability of A = 1 and A = 0 
+Easy enough
 
-IPTW requires the assumption of positivity or experimental treatment assignment (ETA) where the observed treatment levels vary within confounded strata. Positivity violations occur when certain subgroups in a sample rarely or never (or almost always) receive some treatments of interest. The resulting sparsity in the data may increase bias with or without an increase in variance and can threaten valid inference. 
+## Estimating probability of a=1 and a=0 
 
-Before we create the weights, we first need to see if we have an ETA violation. Since these are simulated data and there are no factors that affect treatment probability, there won't be. The histogram doesn't make sense in this case, so I"m commenting it out.
+- For each observation, we estimate the probability of being exposed and simply take 1 minus that probability to calculate the probability of not being exposed
+
+- Before we create the weights, we first need to see if we have positivity, or experimental treatment assignment (ETA),violations (since these are simulated data and there are no factors that affect exposure probability, there won't be) 
+
+- Assessing ETA vilations is easy enough to do by looking at a distribution of the predicted probabilities of A
 
 ```{r iptw step 2.1}
 # vector of propensity exposed for each observation
@@ -187,10 +234,12 @@ prob_exposed <- predict(prop_mod, type = "response")
 prob_unexposed <- 1 - prob_exposed 
 # histogram to check for ETA violation
 #hist(prob_exposed)
+head(prob_exposed)
 ```
 
-## Creating Weights 
-The weight (wt) is simply 1 over the probability of being exposed or unexposed. For those who were exposed, we assign wt as 1/pr(A=1). For unexposed, we assign wt as 1/pr(A=0)
+## Creating weights 
+
+- The weight (wt) is simply 1 over the probability of being exposed or unexposed. For those who were exposed, we assign wt as 1/pr(a=1). For unexposed, we assign wt as 1/pr(a=0)
 
 ```{r iptw step 2.2}
 # create weights
@@ -201,39 +250,46 @@ wt <- as.numeric(sim_data$A == 1)/prob_exposed +
 head(data.frame(sim_data$Y, sim_data$A, 1/prob_exposed, 1/prob_unexposed, wt))
 ```
 
-## Estimating the Statistical Parameter
+## Estimating the statistical parameter
 
 Now that we have the weights, we take all the subjects where A=1, multiply the weight and outcome and divide that by all the subjects where A=0 multiplied by the weights and outcome.
 
 ```{r iptw step 3}
-iptw <- mean(as.numeric(sim_data$A==1)*wt*sim_data$Y)/
+# ratio estimate
+iptw_ratio <- mean(as.numeric(sim_data$A==1)*wt*sim_data$Y)/
   mean(as.numeric(sim_data$A==0)*wt*sim_data$Y)
 # estimate
-round(iptw,2)
+round(iptw_ratio,2)
 ```
 
-I'm not sure this is a counter factual estimate, but it is considered a causal estimate. Note: may revise all slides to focus on "causal inference methods" rather than counter factual.
+## What's the point?
 
-## What's the Point?
-You've probably thought that this is a lot of work to arrive at the same point estimate that can be estimated with a line of code. 
+- This is a lot of work to arrive at the same point estimate that can be estimated with a line of code 
 
-Also, you've probably noticed that we haven't estimated any sort of inferential statistics like confidence intervals. Both g-computation and IPTW don't have empirical variance formulas (to my knowledge), therefore confidence intervals need to be estimated by bootstrapping or other sandwich approximations.
+- We haven't estimated any sort of inferential statistics like confidence intervals. 
 
-There are two scenarios where these 'causal' estimates will differ from standard regression approaches.
+- G-computation and IPTW don't have empirical variance formulas (to my knowledge), therefore confidence intervals need to be estimated by bootstrapping or other sandwich approximations.
 
-1. The estimation of treatment on outcome that is confounded by a time-dependent factor.
+- There are two scenarios where these 'causal' estimates from MSMs will differ from standard regression approaches and where they are the most appropriate statistical approach
 
-2. The estimation of treatment on outcome in the presence of interaction.
+## MSMs shine when...
 
-## Causal Estimates when A is Under the Influence of a Time-Dependent Confounder
-Note I can't figure out how to estimate these values yet so I may cut it out for now.
+1. The estimation of exposure on outcome is confounded by a time-dependent factor
 
-The g-computation and IPTW can be used to give a marginal estimate of the effect of a binary exposure/treatment (A) on an outcome (Y) when A is administered at multiple time points. Further, A at time 0 influence a third factor Z, and that factor in turn influences A at time 1. Thus, our A and Y association is confounded by a time-dependent factor (Z). 
+2. The estimation of exposure on outcome in the presence of interaction.
 
-This is a little confusing, so we'll show an example. I'm going to use the example from Naimi et al. 2017, *An introduction to g methods*. It's a nicely written paper for those new to these causal inference methods and it also has SAS code for SAS users.
+## MSM and a time-dependent confounder
 
+- MSMs can help us get unbiased average/marginal estimates of exposure/treatment (A) on an outcome (Y) when A is administered at multiple time points and when a third factor (Z) is effected by A at time 0 and affects A at time 1 
 
-## Simulating Example Shown in Naimi 2017
+- I'm going to use the example from Naimi et al. 2017, *An introduction to g methods*. It's a nicely written paper for those new to these causal inference methods and it also has SAS code for SAS users
+
+## Causal structure of our example
+
+![](naimi_fig.png)
+
+## Simulating example Naimi data 
+
 The Naimi paper uses the SAS cards statement to provide strata estimates. I've simulated a nearly identical data frame (code hidden due to size).
 
 ```{r time dependent Z sim data, echo=F}
@@ -281,16 +337,18 @@ td_sim_data <- rbind(strata1, strata2, strata3, strata4, strata5, strata6,
 rm(strata1, strata2, strata3, strata4, strata5, strata6, strata7, strata8)
 ```
 
-Summary statistics for the simulated dataframe that approximate table 1 in Naimi.
-```{r summary td data frame}
+```{r summary td data frame, echo=F}
 summary_td_sim_data <- td_sim_data %>% group_by(strata) %>% 
   summarise(A0 = mean(A0), Z1 = mean(Z1), A1 = mean(A1), Y = mean(Y),
             N = n())
 
-summary_td_sim_data
+knitr::kable(summary_td_sim_data, 
+  caption = "Simulated average outcome values by strata of treatment (A) and confounder (Z)")
 ```
 
-Standard regression estimate.
+## Standard estimates of the average effect of A on Y 
+
+For reference, the 'true' average effect of A0 and A1 on Y is an increase of 50 CD4 count
 
 ```{r time dependent std regression, echo = F}
 std_est_table <- as_tibble(matrix(NA, nrow = 6, ncol = 2))
@@ -314,11 +372,12 @@ knitr::kable(std_est_table,
   caption = "Standard regression estimates of average effect of A on Y")
 ```
 
-Now that we have our simulated data, we'll replicate the results Naimi et al.
-of marginal (overall) effect of HIV treatment on CD4 count.
+## G-formula accounting for time-dependent confounder
 
-Trying to replicate simple substitution example in sas code.
-```{r}
+Now that we have our simulated data, we'll replicate the results Naimi et al.
+of marginal (overall) effect of HIV treatment on CD4 count
+
+```{r, eval = F}
 # g formula
 y_mod <- glm(Y ~ A1 + Z1 + A0 + A1*A0, data = td_sim_data, family = "gaussian")
 z1_mod <- glm(Z1 ~ A0, data = td_sim_data, family = "binomial"(link="logit"))
@@ -402,7 +461,7 @@ g.formula.td(data = td_sim_data, y = "Y", a0 = "A0", a1= "A1", z1 = "Z1",
 
 ```
 
-```{r iptw td}
+```{r iptw td, eval = F}
 MSModelR::iptw
 
 # define propensity models (intercept only model without covariates)
@@ -446,7 +505,7 @@ sum(iptw_mod$coefficients[names(iptw_mod$coefficients)=="A0" |
 ```
 To make things easier, let's load some functions I've made for g-computation and IPTW.
 
-```{r}
+```{r, eval=F}
 # install custom package MSModelR
 # devtools::install_github("RyanGan/MSModelR")
 # load library
