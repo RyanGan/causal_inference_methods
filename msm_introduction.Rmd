@@ -16,13 +16,16 @@ library(broom)
 
 ## "Causal Inference" 
 
-If you've been to Society for Epidemiologic Research or any epi methods conference, you've probably heard something about "causal inference".
+Causal inference methods are very popular (particularly with methods epidemiologists)
 
-You've also probably heard a lot of gibberish about g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust, targeted maximum likelihood, etc.
+Terms associated with thesee methods include: DAGs, g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust estimation, targeted maximum likelihood, etc.
 
-And like me, you probably have no idea what any of those are, what they are used for, or even how to use them. But they are always referred to as being used in "causal inference", so these fancy-pants models must be special and the only way to find causal associations.
+This presentation provides an introduction to two of the more common of these methods. 
 
-This presentation provides a general overview of things I've learned about these methods. I'm still confused about a lot of this topic area (like how is the g-formula different from g-estimation?), but hopefully this will server as a primer.
+## What's the big deal about causal inference methods?
+ 
+ - 
+
 
 ## Causal Inference Models
 
@@ -405,8 +408,40 @@ MSModelR::iptw
 # define propensity models (intercept only model without covariates)
 pr_a0_mod <- glm(A0 ~ 1, data = td_sim_data, family="binomial")
 # probability of being treated at time 1
-pr_a0 <- mean(predict(pr_a0_mod, type = "response"))
-# pr a1 | stuff
+pr_a0 <- predict(pr_a0_mod, type = "response")
+# define propensity a1 model
+pr_a1_mod <- glm(A1 ~ 1, data = td_sim_data, family = "binomial")
+# probability of being treated at time 2
+pr_a1 <- predict(pr_a1_mod, type = "response")
+# probability of a1 given z1
+pr_a1_z_mod <- glm(A1 ~ Z1, data = td_sim_data, family = "binomial")
+# probability of a1 given z1
+pr_a1_z <- predict(pr_a1_z_mod, type = "response")
+
+# create weights in dataframe
+td_sim_data <- td_sim_data %>% 
+  mutate(wt = ifelse(A0 == 1 & A1 == 1, (pr_a0/pr_a0)*(pr_a1/pr_a1_z),
+    ifelse(A0 == 1 & A1 == 0, (pr_a0/pr_a0)*((1-pr_a1)/(1-pr_a1_z)),
+    ifelse(A0 == 0 & A1 == 1, ((1-pr_a0)/(1-pr_a0))*(pr_a1/pr_a1_z),
+    ifelse(A0 == 0 & A1 == 0, ((1-pr_a0)/(1-pr_a0))*((1-pr_a1)/(1-pr_a1_z)),NA
+    )))))
+
+# table of summarized weights
+wt_table <- td_sim_data %>% 
+  group_by(strata) %>% 
+  summarise(A0 = mean(A0), Z1 = mean(Z1), A1 = mean(A1), Y = mean(Y), n = n(),
+            wt = mean(wt), pseudo_n = n*wt)
+  
+wt_table
+
+# weighted model
+iptw_mod <- glm(Y ~ A0 + A1 + A0*A1, data = td_sim_data, weights = wt,
+                family = "gaussian")
+
+summary(iptw_mod)
+
+sum(iptw_mod$coefficients[names(iptw_mod$coefficients)=="A0" | 
+  names(iptw_mod$coefficients)=="A1" | names(iptw_mod$coefficients)=="A0*A1"],1)
 
 ```
 To make things easier, let's load some functions I've made for g-computation and IPTW.
