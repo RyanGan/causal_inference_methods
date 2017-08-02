@@ -8,3 +8,5 @@
 *.html
 # ignore directories wthin this directory for now.
 */
+
+*.png
