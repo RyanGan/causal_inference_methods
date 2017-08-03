@@ -18,51 +18,49 @@ library(broom)
 
 ## Causal inference 
 
-- Causal inference methods are growing in popularity (particularly among the epidemiology methodologists)
+- Causal inference methods are growing in popularity (particularly among the epidemiology methodologists).
 
-- Terms associated with thesee methods include: DAGs, counterfactual, potential outcomes, g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust estimation, targeted maximum likelihood, etc.
+- Terms associated with these methods include: DAGs, counter factual, potential outcomes, g-estimation, g-computation, g-formula, g-something, inverse-probability-of-treatment weighting, marginal structural models, doubly-robust estimation, targeted maximum likelihood, etc.
 
-- Jargon around this field makes these methods intimidating
+- Jargon around this field makes these methods intimidating.
 
 - This presentation will focus on marginal structural models (MSMs) and provide an introduction to two of the more common of these methods. 
 
 ## What's the big deal about causal inference methods?
 
-- Another tool/skillset to help evaluate causal relationships
+- Another tool/skill set to help evaluate causal relationships.
 
-- Emphasis mostly placed on the analysis of data 
+- Emphasis mostly placed on the analysis of data.
 
-- Causal inference language is different from statistical language (i.e. X affecting Y vs. X correlated with Y) although we may run the exact same statistical test to assess
+- Causal inference language is different from statistical language (i.e. X affecting Y vs. X correlated with Y) although we may run the exact same statistical test to assess.
 
-## Three main methods you'll hear about
+## Three terms you'll frequently encounter
 
-1. Directed Acyclic Graphs (DAGs): help to understand potential relationships between variables (i.e. potential collider and confounding bias)and how data may have been generated (i.e. temporal sequence exposure affects outcome)
+1. Directed Acyclic Graphs (DAGs): help to understand potential relationships between variables (i.e. potential collider and confounding bias)and how data may have been generated (i.e. temporal sequence exposure affects outcome).
 
-2. Counterfactual/potential outcomes: makes explicit the "what if?" scenario 
+2. Counter factual/potential outcomes: makes explicit the "what if?" scenario.
 
-3. MSMs provide consistent estimates of differences or ratios of average (marginal) potential outcomes with less restrictions compared to standard regression methods (we'll return to this when we talk about time-dependent confounding)
+3. MSMs provide consistent estimates of differences or ratios of average (marginal) potential outcomes with less restrictions compared to standard regression methods (we'll return to this when we talk about time-dependent confounding).
 
-- Keep in mind your training in standard regression and this will make more sense!
 
 ## What is a counter factual?
 
-- Randomized control trial: randomly assign exposure and no exposure to two groups and follow them over time to see which group is more likely to develop the outcome 
+- Randomized control trial: randomly assign exposure and no exposure to two groups and follow them over time to see which group is more likely to develop the outcome. 
 
-- What is implicit in this design is that the 'no exposure' group represents what would have happened to the 'exposure' group
+- What is implicit in this design is that the 'no exposure' group represents what would have happened to the 'exposure' group.
 
-- A missing data problem: a subject's exposure and outcome can be observed only once 
+- A missing data problem: a subject's exposure and outcome can be observed only once. 
 
-- The counter factual solves our missing data problem and takes our "what if?" questions from implicit to explicit in our analysis of data
+- The counter factual solves our missing data problem and takes our "what if?" questions from implicit to explicit in our analysis of data.
 
-- You will also see this called potential outcomes framework in some circles (economists)
 
 ## Marginal Structural Models (MSMs)
 
-- Uses the pricinipal of the counter factual and allows us to estimate an unbiased and consistent effect,under a less-restrictive set of assumptions:
+- Uses the principal of the counter factual and allows us to estimate an unbiased and consistent effect,under a less-restrictive set of assumptions:
 
-1. Counterfactual consistency
+1. Counter factual consistency
 
-2. Exchangebility
+2. Exchangeability
 
 3. Positivity
 
@@ -70,23 +68,23 @@ library(broom)
 
 - Allows us to equate observed outcomes for a given exposure value to the potential outcomes that would be observed under the same exposure value.
 
-- This assumption depends on exposure assignment mechanism (i.e. RCT)
+- This assumption depends on exposure assignment mechanism (i.e. RCT).
 
 ## Exchangeability
 
-- Potential outcome under exposure a~0~ and a~1~ are independent of the observed exposures A~0~ and A~1~
+- Potential outcome under exposure a~0~ and a~1~ are independent of the observed exposures A~0~ and A~1~.
 
-- Can be tested emprically
+- Can be tested empirically.
 
-- Easier to understand as being able to exchange exposure groups and observing the same distribution of the outcome
+- Easier to understand as being able to exchange exposure groups and observing the same distribution of the outcome.
 
-- Conditional exchangeability happens when there is no unmeasured confounding
+- Conditional exchangeability happens when there is no unmeasured confounding.
 
 ## Positivity 
 
-- Probability of exposure is not 0 or 1
+- Probability of exposure is not 0 or 1.
 
-- Can be emprically evaluated to make sure there are exposed and unexposed individuals within each confounder strata and prior exposure levels
+- Can be empirically evaluated to make sure there are exposed and unexposed individuals within each confounder strata and prior exposure levels.
 
 ## Two commonly used MSMs 
 
@@ -99,9 +97,9 @@ While there are more classes of MSMs we'll cover the most basic two
 
 ## Simulated data
 
-I've simulated a simple example data frame with a known relationship to show you how to implement these two methods
+I've simulated a simple example data frame with a known relationship to show you how to implement these two methods.
 
-Simulate code is hidden, but here are the first 6 observations and a 2x2 table
+Simulate code is hidden, but here are the first 6 observations and a 2x2 table.
 ```{r simple simulation, echo=FALSE}
 # set sample size and seed 
 n <- 5000; set.seed(777)
@@ -120,38 +118,34 @@ xtabs(~A + Y, sim_data)
 
 - G-computation is a way in which we can estimate the counter factual state where everyone is treated/exposed (denoted by a = 1) and no one is treated/exposed (denoted by a = 0) and is implemented in a 3-step process:
 
-1. Estimation of the conditional mean outcome E(Y|A)
+1. Estimation of the conditional mean outcome E(Y|A).
 
-2. Obtaining predicted potential outcomes under a = 1 and a = 0
+2. Obtaining predicted potential outcomes under a = 1 and a = 0.
 
-3. Estimate the statistical parameter (difference/ratio) by substituting the predicted mean outcomes under a=1 and a=0
+3. Estimate the statistical parameter (difference/ratio) by substituting the predicted mean outcomes under a=1 and a=0.
 
 ## Estimation of the conditional mean outcome E(Y|A)
 
 This can be estimated with your standard generalized linear model. We'll estimate the risk ratio, but risk difference can be estimated as well. 
 
-*Risk Ratio of E(Y|A)*
 ```{r risk ratio}
 # standard ratio model
 ratio_model <- glm(Y~A, sim_data, family = "binomial"(link="logit"))
 # ratio estimate
 round(exp(ratio_model$coefficients[2]),2)
 ```
-The treated group is 40% less likely to develop the outcome compared to the untreated group 
+The treated group is 40% less likely to develop the outcome compared to the untreated group. 
 
 ## Updating the predicted outcomes under a=1 
 
-First we duplicate our original data frame and then set everyone's exposure to 1
-
+First we duplicate our original data frame and then set everyone's exposure to 1.
 ```{r create a1 exposure dataframe}
 # set everyone to exposed from our original dataframe
 sim_data_a1 <- sim_data %>% mutate(A = 1)
 # view first 6 records
 head(sim_data_a1)
 ```
-
-Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the data frame where everyone receives exposure E(Y|a=1)
-
+Now we apply our saved model coefficients (ratio_model) and updated the predicted values using the data frame where everyone receives exposure E(Y|a=1).
 ```{r pr a1}
 # updated predicted probability of outcome 
 pr_a1 <- predict(ratio_model, newdata = sim_data_a1, type = "response")
@@ -189,13 +183,11 @@ Let's compare to our estimate using logistic regression again.
 round(exp(ratio_model$coefficients[2]),2)
 ```
 
-We get pretty much the same result using the g-formula approach to a standard regression. 
-
-However, the important thing is that we've now made our "what if?" question explicit and testable. 
+We get pretty much the same result using the g-formula approach to a standard regression. However, the important thing is that we've now made our "what if?" question explicit and testable. 
 
 ## MSM via IPTW
 
-Another commonly use method is the inverse-probability-of-treatment weight.This is probably the most common marginal structural models (MSMs) methods used in practice today because it's easier to implement
+Another commonly use method is the inverse-probability-of-treatment weight.This is probably the most common marginal structural models (MSMs) methods used in practice today because it's easier to implement.
 
 With IPTW estimation, confounding can be thought of as a problem of bias sampling where certain exposure-covariate subgroups are over or under represented compared to an randomized control trail. IPTW up-weights under-represented subjects from exposure-covariate strata. 
 
@@ -217,29 +209,26 @@ prop_mod <- glm(A ~ 1, family = "binomial", data = sim_data)
 # summary of model
 ```
 
-Easy enough
+Easy enough.
 
 ## Estimating probability of a=1 and a=0 
 
-- For each observation, we estimate the probability of being exposed and simply take 1 minus that probability to calculate the probability of not being exposed
+- For each observation, we estimate the probability of being exposed and simply take 1 minus that probability to calculate the probability of not being exposed.
 
-- Before we create the weights, we first need to see if we have positivity, or experimental treatment assignment (ETA),violations (since these are simulated data and there are no factors that affect exposure probability, there won't be) 
+- Before we create the weights, we first need to see if we have positivity, or experimental treatment assignment (ETA),violations (since these are simulated data and there are no factors that affect exposure probability, there won't be). 
 
-- Assessing ETA vilations is easy enough to do by looking at a distribution of the predicted probabilities of A
+- Assessing ETA violations is easy enough to do by looking at a distribution of the predicted probabilities of A.
 
 ```{r iptw step 2.1}
 # vector of propensity exposed for each observation
 prob_exposed <- predict(prop_mod, type = "response")
 # vector of propensity not exposed
 prob_unexposed <- 1 - prob_exposed 
-# histogram to check for ETA violation
-#hist(prob_exposed)
-head(prob_exposed)
 ```
 
 ## Creating weights 
 
-- The weight (wt) is simply 1 over the probability of being exposed or unexposed. For those who were exposed, we assign wt as 1/pr(a=1). For unexposed, we assign wt as 1/pr(a=0)
+- The weight (wt) is simply 1 over the probability of being exposed or unexposed. For those who were exposed, we assign wt as 1/pr(a=1). For unexposed, we assign wt as 1/pr(a=0).
 
 ```{r iptw step 2.2}
 # create weights
@@ -264,7 +253,7 @@ round(iptw_ratio,2)
 
 ## What's the point?
 
-- This is a lot of work to arrive at the same point estimate that can be estimated with a line of code 
+- This is a lot of work to arrive at the same point estimate that can be estimated with a line of code. 
 
 - We haven't estimated any sort of inferential statistics like confidence intervals. 
 
@@ -272,29 +261,23 @@ round(iptw_ratio,2)
 
 - There are two scenarios where these 'causal' estimates from MSMs will differ from standard regression approaches and where they are the most appropriate statistical approach
 
-## MSMs shine when...
+## When an MSM will provide a better estimate
 
-1. The estimation of exposure on outcome is confounded by a time-dependent factor
+1. The estimation of exposure on outcome is confounded by a time-dependent factor.
 
 2. The estimation of exposure on outcome in the presence of interaction.
 
 ## MSM and a time-dependent confounder
 
-- MSMs can help us get unbiased average/marginal estimates of exposure/treatment (A) on an outcome (Y) when A is administered at multiple time points and when a third factor (Z) is effected by A at time 0 and affects A at time 1 
+- MSMs can help us get unbiased average/marginal estimates of exposure/treatment (A) on an outcome (Y) when A is administered at multiple time points and when a third factor (Z) is effected by A at time 0 and affects A at time 1. 
 
-- I'm going to use the example from Naimi et al. 2017, *An introduction to g methods*. It's a nicely written paper for those new to these causal inference methods and it also has SAS code for SAS users
+- I'm going to use the example from Naimi et al. 2017, *An introduction to g methods*. It's a nicely written paper for those new to these causal inference methods and it also has SAS code for SAS users.
 
-- In the example, we want to know the average effect of a binary treatment for HIV (A) on continous CD4 counts (Y). Treatment is administered at multiple time points, with the only other covariate being a binary cutoff of HIV viral load (Z), where Z = 1 for viral load > 200 copies/ml. Further, viral load influences the decision to treat at that time point.   
+- In the example, we want to know the average effect of a binary treatment for HIV (A) on continuous CD4 counts (Y). Treatment is administered at multiple time points, with the only other covariate being a binary cutoff of HIV viral load (Z), where Z = 1 for viral load > 200 copies/ml. Further, viral load influences the decision to treat at that time point.   
 
 ## Causal structure of our example
 
 ![](naimi_fig.png)
-
-## Testable research questions
-
-- There are a couple that come to mind:
-
-1. What is the average level of CD4 counts in those that received treatment at time 0 compared to those never treated?
 
 ## Simulating example Naimi data 
 
@@ -354,11 +337,21 @@ knitr::kable(summary_td_sim_data,
   caption = "Simulated average outcome values by strata of treatment (A) and confounder (Z)")
 ```
 
+## Testable research questions
+
+There are a couple that come to mind:
+
+1. What is the average level of CD4 counts in those that received treatment at time 0 compared to those never treated?
+
+2. What is the average level of CD4 counts in those that received treatment at time 1 compared to those never treated?
+
+3. What is the average level of CD4 counts in those treated at both time 0 and time 1 compared to those never treated?
+
 ## Standard estimates of the average effect of A on Y 
 
-We'd like to know the average effect of treatment (at both time points)
+We'd like to know the average effect of treatment (at both time points).
 
-For reference, the 'true' average effect of A0 and A1 on Y is an increase of 50 CD4 count
+For reference, the 'true' average effect of A0 and A1 on Y is an increase of 50 CD4 count.
 
 ```{r time dependent std regression, echo = F}
 std_est_table <- as_tibble(matrix(NA, nrow = 6, ncol = 2))
@@ -382,36 +375,79 @@ knitr::kable(std_est_table,
   caption = "Standard regression estimates of average effect of A on Y")
 ```
 
-## G-formula accounting for time-dependent confounder
+## Reframing the question
 
-Now that we have our simulated data, we'll replicate the results Naimi et al.
-of marginal (overall) effect of HIV treatment on CD4 count
+- None of our various models using standard linear regression yielded the true value of treatment effect on CD4 count of 50.
 
-```{r, eval = F}
+- Let's ask the question what would the effect of treatment be on CD4 count if everyone were treated at both time points vs if no one was treated at both time points?
+
+- MSM's will let us estimate this question.
+
+## G-formula accounting for time-dependent confounder.
+
+Our question that we wish to answer with our MSM can be written as follows:
+
+$$
+\psi = E(Y^{a_0=1,a_1=1} - Y^{a_0=0,a_1=0})
+$$
+
+We can ask other "what if?" questions like "what if everyone was only treated at time 0 vs not treated at other time points?" etc., but we'll just ask this question for now.
+
+## Step 1: estimate standard relationships
+
+- Estimate exposures (A~0~,A~1~) relationship with the outcome (Y).
+- Estimate the effect of treatment (A~0~) on viral load (Z~1~).
+- Estimate the effect of viral load (Z~1~) on treatment (A~1~).
+
+```{r estimate associations}
 # g formula
 y_mod <- glm(Y ~ A1 + Z1 + A0 + A1*A0, data = td_sim_data, family = "gaussian")
 z1_mod <- glm(Z1 ~ A0, data = td_sim_data, family = "binomial"(link="logit"))
 a1_mod <- glm(A1 ~ Z1, data = td_sim_data, family = "binomial"(link="logit")) 
+```
 
-# natural course estimate ----
-nc_mu <- mean(predict(y_mod, newdata = td_sim_data, type = "response"))
+## Estimate Y where everyone is treated at both time points
 
+- We first estimate $$P(Z_1=z_1=1 | A_0 = a_0=1)$$
+
+- Followed by simulating a vector of new counter factual estimates of z~1~ values based on the prior probability of z~1~ = 1, given a~0~ = 1
+
+```{r z1 update}
 # fully exposed ----
 z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 1), 
                       type = "response"))
 # simulate vector of new Z1 values accounting for prior A0
 z1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), z1_pr)==T,1,0)
+```
 
+## Alternate step
+
+- We can also estimate counter factual estimates of a~1~ if we wanted to ask "what if?" questions like "what if we only treated at time 1?"
+
+- But since we are asking treatment at both time points, this step is not needed.
+```{r a1 update}
 # update a1 
 a1_pr <- mean(predict(a1_mod, newdata = mutate(td_sim_data, Z1 = z1_vec), 
                       type = "response"))
 # simulate new a1 given z1 under a0 estimate
 a1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), a1_pr)==T,1,0)
+```
+
+## Estimate Y under all exposed scenario.
+
+- Update our Z1 with z~1~ value in scenario where a~0~ = 1.
+- Updated our A1 and A0 value to all be 1.
+- If you had a new a~1~ vector, that could be added as well.
+
+```{r all exposed estimate}
 # update predicted Y where everyone is exposed at time 0 and 1, and accounting for Z1 | A0 =1 
 all_exposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, 
                 A1 = 1, A0 = 1, Z1 = z1_vec), type = "response"))
 all_exposed
+```
 
+## Repeat the same process for everyone being unexposed
+```{r unexposed estimate}
 # unexposed
 z1_pr <- mean(predict(z1_mod, newdata = mutate(td_sim_data, A0 = 0), 
           type = "response"))
@@ -419,9 +455,21 @@ z1_vec <- ifelse(rbernoulli(n = nrow(td_sim_data), z1_pr)==T,1,0)
 all_unexposed <- mean(predict(y_mod, newdata = mutate(td_sim_data, 
                   A1 = 0, A0 = 0, Z1 = z1_vec), type = "response"))
 all_unexposed
-# diff
-all_exposed - all_unexposed
+```
 
+## Estimate the difference in scenarios
+
+We can now calculate our estimated average effect of treatment on Y where everyone is treated and no one is treated.
+
+```{r g comp difference}
+# diff
+g_diff <- all_exposed - all_unexposed
+g_diff
+```
+
+
+```{r g comp td formula, eval = F, echo = F}
+# hiding this for now, but general formula's will be needed if you want to bootstrap
 # creating a formula. will need dplyr
 g.formula.td <- function(data, y, a0, a1, z1, y.model, y.family,
   a1.model, a1.family, z1.model, z1.family, estimate = "diff"){
@@ -471,9 +519,11 @@ g.formula.td(data = td_sim_data, y = "Y", a0 = "A0", a1= "A1", z1 = "Z1",
 
 ```
 
-```{r iptw td, eval = F}
-MSModelR::iptw
+## IPTW with a time-dependent confounder
 
+First we estimate the propensity of A~0~, A~1~, and A~1~|Z~1~ using standard regression models
+
+```{r iptw td}
 # define propensity models (intercept only model without covariates)
 pr_a0_mod <- glm(A0 ~ 1, data = td_sim_data, family="binomial")
 # probability of being treated at time 1
@@ -486,7 +536,11 @@ pr_a1 <- predict(pr_a1_mod, type = "response")
 pr_a1_z_mod <- glm(A1 ~ Z1, data = td_sim_data, family = "binomial")
 # probability of a1 given z1
 pr_a1_z <- predict(pr_a1_z_mod, type = "response")
+```
 
+## Estimating weights
+
+```{r iptw weigts td}
 # create weights in dataframe
 td_sim_data <- td_sim_data %>% 
   mutate(wt = ifelse(A0 == 1 & A1 == 1, (pr_a0/pr_a0)*(pr_a1/pr_a1_z),
@@ -501,39 +555,137 @@ wt_table <- td_sim_data %>%
   summarise(A0 = mean(A0), Z1 = mean(Z1), A1 = mean(A1), Y = mean(Y), n = n(),
             wt = mean(wt), pseudo_n = n*wt)
   
-wt_table
+head(wt_table)
+```
 
+## Run a generalized model with the weights in the model
+
+We see we get the same result of an average effect of treatment on CD4 outcome is 50.
+
+```{r}
 # weighted model
 iptw_mod <- glm(Y ~ A0 + A1 + A0*A1, data = td_sim_data, weights = wt,
                 family = "gaussian")
-
-summary(iptw_mod)
-
-sum(iptw_mod$coefficients[names(iptw_mod$coefficients)=="A0" | 
+# calculate difference
+iptw_diff <- sum(iptw_mod$coefficients[names(iptw_mod$coefficients)=="A0" | 
   names(iptw_mod$coefficients)=="A1" | names(iptw_mod$coefficients)=="A0*A1"],1)
-
-```
-To make things easier, let's load some functions I've made for g-computation and IPTW.
-
-```{r, eval=F}
-# install custom package MSModelR
-# devtools::install_github("RyanGan/MSModelR")
-# load library
-library(MSModelR)
-
-test <- g.formula(data = td_sim_data, y = "Y", a = c("A0"), model.family = "gaussian",
-                  q.model = "A0+A1+A0*A1+Z1", estimate = "diff")
-
-
-iptw(data=td_sim_data, y = "Y", a = "A1", w = "Z1", estimate = "diff")
-
-?iptw
+# difference
+iptw_diff
 ```
 
+## Comparison with our standard estimates
 
+We can see that both MSM terms give us our 'true' value, where our standard regression terms are off by a bit.
 
+Whether you think this is a big enough deal to use an MSM is up to you :)
 
-A benefit of these approaches over standard regression analyses is that they can provide estimates of the marginal effect of A on Y in the presence of interaction with A.
+```{r std est w msm est, echo = F}
+std_est_msm_table <- std_est_table %>% 
+  add_row( model_params = c("G-Formula", "IPTW"), 
+           a_estimate = c(g_diff, iptw_diff))
 
+knitr::kable(std_est_msm_table, 
+  caption = "Standard and MSM estimates")
+```
 
+## MSMs when there is interaction with exposure
 
+Using an example out of **Implementation of G-Compuation on a Simulated Data Set: Demonstration of a Causal Inference Technique** by Snowden et al. 2011.
+
+This is example is probably a more practical reason to use MSMs to estimate a population-level effect.
+
+The example simulated an effect of a binary cutoff of high ozone (A) on FEV (Y), a continuous measure of pulmonary function. It also include sex (W1) as a confounding variable and an effect modifier for a binary race (W2) that has no base term. This means that race does not effect FEV, but that exposure is modified by race, attenuating the effect on FEV.
+
+The problem here is that we want to estimate a population-level effect for ozone on FEV, regardless of race.
+
+```{r simulate data, echo =F}
+# sample size
+n <- 300
+set.seed(285)
+simdata <- data.frame(W1 = rbinom(n, 1, 0.4), W2 = rbinom(n, 1, 0.5))
+# add simulated data of A
+simdata <- transform(simdata, A = rbinom(n, 1, (0.5+0.2*W1-0.3*W2)))
+# add simulated data of Y
+simdata <- transform(simdata, Y = rnorm(n, (3-0.5*A+W1+0.3*A*W2), 0.4))
+```
+
+## Standard estimation approach
+
+```{r snowden standard model}
+reg_mod <- glm(Y~A+W1+A:W2, data = simdata, family = gaussian)
+reg_mod
+```
+
+- If we want to know the causal effect of ozone (A) on FEV (Y), we have to some how account for the interaction with race (W2).
+
+- For our reference race, high level of ozone decrease FEV by 0.48.
+
+- For other race the effect of ozone decrease FEV by 0.18.
+
+- To estimate a population-level effect, perhaps we could average the two effects? 
+
+- (0.48+0.18)/2 = 0.33
+
+## Let's try our MSM methods
+
+```{r msm with boot estimates, echo = F}
+# percentile method with broom
+# g formula
+set.seed(321)
+boot_msm <- simdata %>% bootstrap(1000) %>% 
+  do(tidy(MSModelR::g.formula(data = ., y = "Y", a = "A", q.model = "A+W1+A:W2",
+            model.family = "gaussian", estimate = "diff")))
+# iptw
+set.seed(123)
+boot_iptw <- simdata %>% bootstrap(1000) %>% 
+  do(tidy(MSModelR::iptw(data = ., y="Y",a="A",w="W1+W2",estimate="diff")))
+
+# create empty matrix
+estimates <- matrix(nrow = 2, ncol = 4, byrow = T)
+colnames(estimates) <- c("msm_estimate", "boot_median", "lower_95", "upper_95")
+
+# fill matrix for g formula 
+estimates[1,1] <- "G-Formula"
+estimates[1,2] <- round(quantile(boot_msm$x, 0.5),2)
+estimates[1,3] <- round(quantile(boot_msm$x, 0.025),2)
+estimates[1,4] <- round(quantile(boot_msm$x, 0.975),2)
+
+# fill matrix for iptw
+estimates[2,1] <- "IPTW"
+estimates[2,2] <- round(quantile(boot_iptw$x, 0.5),2)
+estimates[2,3] <- round(quantile(boot_iptw$x, 0.025),2)
+estimates[2,4] <- round(quantile(boot_iptw$x, 0.975),2)
+
+# convert matrix to dataframe
+est_df <- data.frame(estimates)
+
+knitr::kable(est_df, caption = paste0("MSM estimates with bootstrapped 95%CI"))
+```
+
+- G-formula estimate gives us the average value for each races of ozone on FEV. 
+
+- IPTW is a little over this average estimate, but different from anyone race estimate alone. 
+
+## MSMs
+
+Cons:
+
+- Producing estimates that may be interpreted as casual still requires assumptions like temporarily and no unmeasured confounding.
+
+- May be a lot of effort (and computationally expensive) to arrive at the same answer you'd get with a standard regression.
+
+- G-formula and IPTW don't handle continuous variables.
+
+Pros:
+
+- Most appropriate analytic method in some scenarios (time-dependent confounding).
+
+- Going through the whole process of figuring out causal structures (DAGs), checking assumptions, and implementing MSMs provides an excellent framework and tool for assessing causal relationships.
+
+## Cutting edge stuff
+
+- Doubly-robust estimation: combines both the q-model and propensity model and if even one of those models is specified correctly the estimate will be correct.
+
+- Targeted maximum likelihood (TMLE): uses an ensemble of machine learning algorithms to optimize the q-model and propensity model to control for confounders.
+
+- Structural nested models: old method that can handle continuous exposures but was difficult to implement; new packages for R are making this more accessible to average users. 
