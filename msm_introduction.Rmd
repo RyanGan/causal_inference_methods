@@ -284,9 +284,17 @@ round(iptw_ratio,2)
 
 - I'm going to use the example from Naimi et al. 2017, *An introduction to g methods*. It's a nicely written paper for those new to these causal inference methods and it also has SAS code for SAS users
 
+- In the example, we want to know the average effect of a binary treatment for HIV (A) on continous CD4 counts (Y). Treatment is administered at multiple time points, with the only other covariate being a binary cutoff of HIV viral load (Z), where Z = 1 for viral load > 200 copies/ml. Further, viral load influences the decision to treat at that time point.   
+
 ## Causal structure of our example
 
 ![](naimi_fig.png)
+
+## Testable research questions
+
+- There are a couple that come to mind:
+
+1. What is the average level of CD4 counts in those that received treatment at time 0 compared to those never treated?
 
 ## Simulating example Naimi data 
 
@@ -347,6 +355,8 @@ knitr::kable(summary_td_sim_data,
 ```
 
 ## Standard estimates of the average effect of A on Y 
+
+We'd like to know the average effect of treatment (at both time points)
 
 For reference, the 'true' average effect of A0 and A1 on Y is an increase of 50 CD4 count
 
