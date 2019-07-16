@@ -5,11 +5,11 @@ date: "April 18, 2017"
 output: html_document
 ---
 
-Using code from Snowden paper to try out MSM models and maybe test out SuperLearner and Target Maximum Likelihood packages.
+Using code from Snowden paper to try out MSM models and SuperLearner and Target Maximum Likelihood packages.
 
 ```{r libraries, message=F}
 library(tidyverse)
-library(broom)
+library(rsample)
 library(SuperLearner)
 library(tmle)
 ```
@@ -123,11 +123,20 @@ gcomp_est
 Function works. Now we can feed it through broom's bootstrap function and calculation 95%CIs via percentile method.
 
 ```{r gcomp boot}
+# set funciton to handle splits for rsample package
+simple_sub <- function(split){
+  MSModelR::g.formula(data = analysis(split), y = "Y", a = "A", 
+                      q.model = "A+W1+A:W2", 
+                      model.family = "gaussian", estimate = "diff")
+}
+
 # percentile method with broom
 set.seed(321)
-boot_msm <- simdata %>% bootstrap(1000) %>% 
-  do(tidy(g_comp_func(data = ., y = "Y", a = "A", q_mod = "A+W1+A:W2",
-            mod_family = "gaussian", estimate = "diff")))
+boot_msm <- simdata %>% 
+  bootstraps(times = 1000) %>% 
+  mutate(coef = map(splits, simple_sub)) %>% 
+  unnest(coef)
+  
 
 # create empty matrix
 estimates <- matrix(nrow = 1, ncol = 4, byrow = T)
@@ -135,9 +144,9 @@ colnames(estimates) <- c("msm_estimate", "boot_median", "lower_95", "upper_95")
 
 # fill matrix 
 estimates[,1] <- round(gcomp_est,3)
-estimates[,2] <- round(quantile(boot_msm$x, 0.5),3)
-estimates[,3] <- round(quantile(boot_msm$x, 0.025),3)
-estimates[,4] <- round(quantile(boot_msm$x, 0.975),3)
+estimates[,2] <- round(quantile(boot_msm$coef, 0.5),3)
+estimates[,3] <- round(quantile(boot_msm$coef, 0.025),3)
+estimates[,4] <- round(quantile(boot_msm$coef, 0.975),3)
 
 # convert matrix to dataframe
 est_df <- data.frame(estimates)
@@ -242,10 +251,18 @@ iptw_est
 ```
 
 ```{r iptw boot}
-# percentile method with broom
+# percentile method with rsample
 set.seed(321)
-boot_iptw <- simdata %>% bootstrap(1000) %>% 
-  do(tidy(iptw_func(data=., y="Y", a="A", w="W1+W2", estimate="diff")))
+
+iptw <- function(split){
+  iptw_func(data = analysis(split), 
+                 y="Y",a="A",w="W1+W2",estimate="diff")
+  }
+
+boot_iptw <- simdata %>% 
+  bootstraps(times = 1000) %>% 
+  mutate(coef = map(splits, iptw)) %>% 
+  unnest(coef)
 
 # create empty matrix
 estimates <- matrix(nrow = 1, ncol = 4, byrow = T)
@@ -253,9 +270,9 @@ colnames(estimates) <- c("iptw_estimate", "boot_median", "lower_95", "upper_95")
 
 # fill matrix 
 estimates[,1] <- round(iptw_est,3)
-estimates[,2] <- round(quantile(boot_iptw$x, 0.5),3)
-estimates[,3] <- round(quantile(boot_iptw$x, 0.025),3)
-estimates[,4] <- round(quantile(boot_iptw$x, 0.975),3)
+estimates[,2] <- round(quantile(boot_iptw$coef, 0.5),3)
+estimates[,3] <- round(quantile(boot_iptw$coef, 0.025),3)
+estimates[,4] <- round(quantile(boot_iptw$coef, 0.975),3)
 
 # convert matrix to dataframe
 est_df <- data.frame(estimates)
@@ -271,8 +288,7 @@ This is a doubly robust estimation method that uses ensemble machine learning (v
 
 ```{r tmle q mod, message=F}
 # register superlearner library
-sl_lib <- c("SL.glm", "SL.glm.interaction", "SL.gam", "SL.nnet", 
-            "SL.randomForest", "SL.step")
+sl_lib <- c("SL.glm", "SL.glm.interaction", "SL.gam", "SL.glmnet","SL.step")
 
 # estimate FEV/Y given the covariates
 sl_outcome_reg <- SuperLearner(Y=simdata$Y, X=subset(simdata, select = -Y),
@@ -298,7 +314,6 @@ expected_y_a1 <- predict(sl_outcome_reg, newdata=simdata_a1)$pred
 expected_y_a0 <- predict(sl_outcome_reg, newdata=simdata_a0)$pred
 
 head(cbind(simdata, expected_y_obsexp, expected_y_a1, expected_y_a0))
-
 ```
 
 *Step 3. Estimate MSM*
@@ -392,13 +407,13 @@ Trying out the tmle package.
 set.seed(123)
 tmle_package_result <- tmle(Y = simdata$Y, A = simdata$A, 
   W = subset(simdata, select = -c(A,Y)),
-  Q.SL.library = c("SL.nnet", "SL.glm", "SL.randomForest", "SL.step",
-        "SL.glm.interaction"), 
-  g.SL.library = c("SL.nnet", "SL.glm", "SL.randomForest", "SL.step",
-        "SL.glm.interaction"),  V = 10)
+  Q.SL.library = c("SL.glm", "SL.step",
+        "SL.glm.interaction", "SL.xgboost"), 
+  g.SL.library = c("SL.glm", "SL.step",
+        "SL.glm.interaction", "SL.xgboost"),  V = 10)
 
-tmle_package_result
+summary(tmle_package_result)
 ```
 
-Wow. This was much faster and produced 95% CIs. TMLE has it's own formla for calculating SE as described in package description in J of Stats Software. It tells me the same thing as the MSM bootstrapped method.
+This was much faster and produced 95% CIs. TMLE has it's own formla for calculating SE as described in package description in J of Stats Software. It tells me the same thing as the MSM bootstrapped method.
 

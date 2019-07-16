@@ -1,0 +1,92 @@
+---
+title: "Propensity Example"
+author: "Ryan Gan"
+date: "7/6/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Propensity Example
+
+Following Lucy D'Agostino McGowan's blog and dissertation work to understand newer weight methods for propensity scores.
+
+https://livefreeordichotomize.com/2019/01/17/understanding-propensity-score-weighting/
+
+Simulate data.
+
+```{r}
+set.seed(928)
+n <- 1000
+X <- mvtnorm::rmvnorm(n,
+                      mean = c(0.5, 1),
+                      sigma = matrix(c(2, 1, 1, 1), ncol = 2)
+)
+
+dat <- tibble(
+  x_1 = X[, 1],
+  x_2 = X[, 2],
+  treatment = as.numeric(- 0.5 + 0.25 * x_1 + 0.75 * x_2 + rnorm(n, 0, 1) > 0),
+  outcome = 2 * treatment + rnorm(n, 0, 1)
+)
+head(dat)
+```
+
+Fit propensity.
+
+```{r}
+dat <- dat %>%
+  mutate(
+    propensity_score = glm(treatment ~ x_1 + x_2, data = dat, family = "binomial") %>%
+      predict(type = "response")
+  )
+```
+
+Estimate weights from propensity.
+
+```{r}
+dat <- dat %>%
+  mutate(
+    w_ate = (treatment / propensity_score) + 
+      ((1 - treatment) / (1 - propensity_score)),
+    w_att = ((propensity_score * treatment) / propensity_score) + 
+      ((propensity_score * (1 - treatment)) / (1 - propensity_score)),
+    w_atc = (((1 - propensity_score) * treatment) / propensity_score) + 
+      (((1 - propensity_score) * (1 - treatment)) / (1 - propensity_score)),
+    w_atm = pmin(propensity_score, 1 - propensity_score) / 
+      (treatment * propensity_score + (1 - treatment) * (1 - propensity_score)),
+    w_ato = (1 - propensity_score) * treatment + 
+      propensity_score * (1 - treatment)
+  )
+```
+
+View propensity in mirrored display.
+
+```{r}
+d <- dat %>%
+  tidyr::spread(treatment, propensity_score, sep = "_p")
+
+ggplot(d) + 
+  geom_histogram(bins = 50, aes(treatment_p1)) + 
+  geom_histogram(bins = 50, aes(x = treatment_p0, y = -..count..)) + 
+  ylab("count") + xlab("p") +
+  geom_hline(yintercept = 0, lwd = 0.5) +
+  scale_y_continuous(label = abs) 
+```
+
+
+
+```{r}
+ggplot(d) +
+  geom_histogram(bins = 50, aes(treatment_p1), alpha = 0.5) + 
+  geom_histogram(bins = 50, aes(treatment_p1, weight = w_ate), fill = "green", alpha = 0.5) + 
+  geom_histogram(bins = 50, alpha = 0.5, aes(x = treatment_p0, y = -..count..)) + 
+  geom_histogram(bins = 50, aes(x = treatment_p0, weight = w_ate, y = -..count..), fill = "blue", alpha = 0.5) + 
+  ylab("count") + xlab("p") +
+  geom_hline(yintercept = 0, lwd = 0.5) +
+  scale_y_continuous(label = abs) 
+```
+
