@@ -1,0 +1,638 @@
+---
+title: "Causal inference methods examples part 2"
+author: "Ryan Gan"
+date: "8/7/2021"
+output: html_document
+---
+
+```{r setup}
+# loading r packages i'll use in this example
+library(tmle) # targeted maximum likelihood
+library(MASS)
+library(xgboost) # gradient boosting with l2 regularization
+library(glmnet) # lasso, ridge, and elastic regularization
+library(gbm) # gradient boosting machiens
+library(shapr) # explainable tree modles
+library(tidyverse) # general data wrangling and plotting
+library(mgcv) # for non-linear terms
+```
+
+Start by simulating a relationship between the treatment and a binary outcome. 
+Adding two known confounders that affect both treatment and outcome and adding
+some random normal variables with no association with either treatment or outcome
+(although may happen by chance).
+
+
+
+- Simple sim
+- Interaction and non-linear sim
+```{r sim}
+# binary confounder example 
+set.seed(100)
+c1_x_association <- log(5)
+c1_y_association <- log(5)
+c2_x_association <- log(0.25)
+c2_y_association <- log(0.25)
+
+trt_out_association_true <- log(0.5) # true effect, protective effect
+
+# sample size (note bias shrinks as sample size increases)
+n <- 5000
+# known confounders
+c1 <- rbinom(n, 1, 0.6)
+c2 <- rbinom(n, 1, 0.2)
+age <- rnorm(n, mean = 55, sd = 5) # for non-linear function
+
+# non-linear term on older patients less likely to get treatment
+
+# 10 random noise variables to add to the model
+rv_mat <- matrix(rnorm(n*10), ncol=10)
+# give matrix some variable names 
+colnames( rv_mat ) <- paste0('rv_', 1:10)
+
+# relationship between confounders and treatment
+trt <- rbinom(n, 1, (1 / (1+exp(-(c1*c1_x_association + c2*c2_x_association + 0.2*age + -0.0045*age^2)))))
+
+# likelihood fun that includes relationship with treatment
+
+lik_fun <- (
+  1 / (1 + exp( -(trt*trt_out_association_true + c1*c1_x_association + c2*c2_x_association + 0.01*age ) ) )
+  )
+
+# binomial outcome based on the likelihood function
+outcome <- rbinom(n, 1, lik_fun)
+
+# put it all together in a dataframe to be used later
+df <- data.frame( cbind(outcome, trt, c1, c2, age, rv_mat) ) 
+
+```
+
+2 x 2 and proportion table by treatment and outcome. In crude analysis, looks 
+like both the relative risk and odds ratio suggest treatment increases likelihood
+for the outcome. Note since our proportion of the outcome is high, the odds ratio
+will not approximate the relative risk.
+
+```{r 2x2}
+tab <- xtabs(~ trt + outcome)
+print(tab)
+
+# crude relative risk
+( tab[2,2] / sum(tab[2,]) ) / ( tab[1,2] / sum(tab[1, ]) )
+# crude odds ratio
+( tab[2,2] / tab[2,1])/ ( tab[1,2] / tab[1, 1] ) 
+```
+
+
+
+Estimation of crude associations with generalized linear models.
+```{r crud_mods}
+crude_trt_est <- broom::tidy( glm(outcome ~ trt, family = 'binomial') )[2, ]$estimate
+
+# bias
+print(paste0('Bias of True - Expected: ', round( crude_trt_est - trt_out_association_true , 2) ))
+```
+
+If we know the confounders of interest (based on previous studies or expert input),
+a regression model works well enough for most cases.
+
+```{r adj_mod}
+
+# adjusted model formula with known confounders
+adj_mod <- glm(outcome ~ trt + c1 + c2 + age, family = binomial(link='logit'), data = df)
+
+
+# bias
+print(
+  paste0('Bias of True - Expected: ', 
+         round( trt_out_association_true - adj_mod$coefficients['trt'], 2)
+         )
+  )
+```
+
+# G-Computation
+
+G-computation (counterfactual estimate) first proposed by Robins in the epi 
+literature sometime in the 1990s. In my opinion, this is Pearl's Do-calculus. 
+Both state that if we specify a model `outcome | treatment, covariates` sufficiently
+to account for confounding bias, then we have achieved condiitonal exchangability.
+We can then estimate the marginal effect of treatment on the outcome by taking
+the model and predicting as if everyone were treated, and predicting as if 
+no one was treated. The average predicted score where everyone is treated can
+then be compared to the average predicted score where no one was treated and 
+that should be the marginal risk difference (in a binary outcome) or relative
+ratio difference.
+
+Using our adjusted model above, we can estimate this as follows:
+
+```{r g_comp}
+# copy dataframes
+all_trt_df <- no_trt_df <- df
+# set trt to all trt or no trt
+all_trt_df$trt <- 1
+no_trt_df$trt <- 0
+
+
+# estimate using fit model and take the average of predictions
+all_trt_pred <- predict(adj_mod, newdata = all_trt_df, type = 'response') 
+no_trt_pred <- predict(adj_mod, newdata = no_trt_df, type = 'response') 
+
+# means for risk
+trt_mean <- mean( all_trt_pred )
+no_trt_mean <- mean( no_trt_pred )
+
+# log odds ratio
+mean_log_odds <- mean( log( ( all_trt_pred / (1 - all_trt_pred ) ) / (no_trt_pred / (1 - no_trt_pred)) ) )
+
+# absolute reduction in risk
+print(paste0( 'Risk difference: ', round( trt_mean - no_trt_mean , 2 ) ) )
+# relative reduction in risk
+print(paste0( 'Relative risk: ', round( trt_mean / no_trt_mean , 2 ) ) )
+# odds ratio
+gcomp_or <- ( trt_mean / ( 1 - trt_mean ) ) / (no_trt_mean / ( 1 - no_trt_mean ) )
+print(paste0('Odds ratio: ', round( gcomp_or , 2)) )
+
+# bias
+print(
+  paste0('Bias of True - Expected: ', 
+         round( trt_out_association_true - mean_log_odds, 2)
+         )
+  )
+```
+
+All covs in model.
+
+```{r g_comp_glm_incorrect}
+inc_mod <- glm(outcome ~ trt + c1 + c2 + age + rv_1 + rv_2 + rv_3 + rv_4 + rv_5
+               + rv_6 + rv_7 + rv_8 + rv_9 + rv_10, 
+               family = binomial(link='logit'), data = df)
+
+
+# estimate using fit model and take the average of predictions
+all_trt_pred_inc <- predict(inc_mod, newdata = all_trt_df, type = 'response') 
+no_trt_pred_inc <- predict(inc_mod, newdata = no_trt_df, type = 'response') 
+
+# means for risk
+trt_mean_inc <- mean( all_trt_pred_inc )
+no_trt_mean_inc <- mean( no_trt_pred_inc )
+
+# log odds ratio
+mean_log_odds_inc <- mean( 
+  log( ( all_trt_pred_inc / (1 - all_trt_pred_inc ) ) / (no_trt_pred_inc / (1 - no_trt_pred_inc)) )
+  )
+
+# absolute reduction in risk
+print(paste0( 'Risk difference: ', round( trt_mean_inc - no_trt_mean_inc , 2 ) ) )
+# relative reduction in risk
+print(paste0( 'Relative risk: ', round( trt_mean_inc / no_trt_mean_inc , 2 ) ) )
+# odds ratio
+gcomp_or_inc <- ( trt_mean_inc / ( 1 - trt_mean_inc ) ) / (no_trt_mean_inc / ( 1 - no_trt_mean_inc ) )
+print(paste0('Odds ratio: ', round( gcomp_or_inc , 2)) )
+
+# bias
+print(
+  paste0('Bias of True - Expected: ', 
+         round( trt_out_association_true - mean_log_odds_inc, 2)
+         )
+  )
+
+```
+
+
+G-computation using lasso.
+
+```{r g_comp_lasso}
+# lasso
+lasso_g_mod <- cv.glmnet(
+  x = as.matrix( df[, 2:ncol(df)] ) , 
+  y = df$outcome , 
+  alpha = 1.0, # lasso penalty
+  family = 'binomial'
+)
+
+# estimate using fit model and take the average of predictions
+all_trt_pred_lasso <- predict(
+  lasso_g_mod , 
+  newx = as.matrix( all_trt_df[, 2:ncol(all_trt_df)] ), 
+  s = "lambda.min", type = 'response'
+) 
+
+no_trt_pred_lasso <- predict(
+  lasso_g_mod , 
+  newx = as.matrix( no_trt_df[, 2:ncol(no_trt_df)] ), 
+  s = "lambda.min", type = 'response'
+  ) 
+
+# means for risk
+trt_mean_lasso <- mean( all_trt_pred_lasso )
+no_trt_mean_lasso <- mean( no_trt_pred_lasso )
+
+# log odds ratio
+mean_log_odds_lasso <- mean( 
+  log( 
+    ( all_trt_pred_lasso / (1 - all_trt_pred_lasso ) ) / (no_trt_pred_lasso / (1 - no_trt_pred_lasso))
+    ) 
+  )
+
+# absolute reduction in risk
+print(paste0( 'Risk difference: ', round( trt_mean_lasso - no_trt_mean_lasso , 2 ) ) )
+# relative reduction in risk
+print(paste0( 'Relative risk: ', round( trt_mean_lasso / no_trt_mean_lasso , 2 ) ) )
+# odds ratio
+gcomp_or_lasso <- ( ( trt_mean_lasso) / ( 1 - trt_mean_lasso ) ) / (no_trt_mean_lasso / ( 1 - no_trt_mean_lasso ) ) 
+print(paste0('Odds ratio: ', round( gcomp_or_lasso , 2)) )
+
+# bias
+print(
+  paste0('Bias of True - Expected: ', 
+         round( trt_out_association_true - mean_log_odds_lasso, 2)
+         )
+  )
+
+```
+
+
+G-computation using xgboost.
+
+```{r gcomp_xgb}
+# xgb model
+xgb_g_mod <- xgboost(
+  data = as.matrix( df[, 2:ncol(df)] ),
+  label = df$outcome, 
+  max_depth = 4, eta = 0.01, nrounds = 5000, verbose = 0, nthread = 4, 
+  objective = "binary:logistic"
+)
+
+# estimate using fit model and take the average of predictions
+all_trt_pred_xgb <- predict(xgb_g_mod , newdata = as.matrix( all_trt_df[, 2:ncol(all_trt_df)] )) 
+no_trt_pred_xgb <- predict(xgb_g_mod , newdata = as.matrix( no_trt_df[, 2:ncol(no_trt_df)] )) 
+
+# means for risk
+trt_mean_xgb <- mean( all_trt_pred_xgb )
+no_trt_mean_xgb <- mean( no_trt_pred_xgb )
+
+# log odds ratio
+mean_log_odds_xgb <- mean( 
+  log( 
+    ( all_trt_pred_xgb / (1 - all_trt_pred_xgb ) ) / (no_trt_pred_xgb / (1 - no_trt_pred_xgb))
+    ) 
+  )
+
+# absolute reduction in risk
+print(paste0( 'Risk difference: ', round( trt_mean_xgb - no_trt_mean_xgb , 2 ) ) )
+# relative reduction in risk
+print(paste0( 'Relative risk: ', round( trt_mean_xgb / no_trt_mean_xgb , 2 ) ) )
+# odds ratio
+gcomp_or_xgb <- ( ( trt_mean_xgb) / ( 1 - trt_mean_xgb ) ) / (no_trt_mean_xgb / ( 1 - no_trt_mean_xgb ) ) 
+print(paste0('Odds ratio: ', round( gcomp_or_xgb , 2)) )
+
+# bias
+print(
+  paste0('Bias of True - Expected: ', 
+         round( trt_out_association_true - mean_log_odds_xgb, 2)
+         )
+  )
+
+```
+
+Plot showing bias from true
+```{r gcomp_bias_plot}
+est <- c('Unadjusted GLM', 'Correct Adj GLM', 'G-Comp Adj', 'G-Comp All Cov', 
+         'G-Comp Lasso', 'G-Comp XGB')
+
+g_coef <- c(crude_trt_est, adj_mod$coefficients['trt'], log( g_comp_or ), 
+            log( gcomp_or_inc), log( gcomp_or_lasso ), log( gcomp_or_xgb ) )
+
+g_df <- data.frame(
+  estimation  = 'G-Computation', 
+  method = est , 
+  coef = g_coef
+  ) %>% 
+  mutate(
+    method = factor( method , levels = method ), 
+    odds_ratio = exp( coef )
+  )
+
+
+
+ggplot(g_df, aes( x = method, y = odds_ratio )) +
+  geom_point() +
+  geom_hline(yintercept = exp( trt_out_association_true ), color = 'red') +
+  ylim( 0.25, 1.25 ) +
+  theme_linedraw() +
+  ylab('Odds Ratio') +
+  xlab('Estimation Method')
+```
+
+
+## Propensity score
+
+Another way to estimate is via propensity score. With this approach we model
+the likelihood of being treated. Once we have a model, we can then get the 
+predicted probability of being treated given the covariates and create weights.
+Inverse predicted probability (IPTW) is common, but there are other weighting methods
+that can account for some biases the arise with IPTW. Once we have a predicted
+probability, we can create weights. I'm using a couple models below to illustrate
+how this works using a naive linear model where the age effect is mis-specified,
+a GAM model where a penalized spine is used for age, and an xgboost tree model
+using all predictors (as if we knew nothing about the variables).
+
+Note, we have a non-linear effect of age on treatment that should be accounted for.
+If age is linear, the propensity might not fit as well. I'm not too worried about
+overfitting because I want to try and predict as best I can on the observed
+population and I'm not interested in predicting on an unseen population.
+
+```{r propensity_models}
+# age as a linear term
+lin_pr_mod <- glm(
+  as.formula(
+    paste0('trt ~ ', paste(colnames(df)[3:ncol(df)], collapse = ' + ' ) )
+    ), family = 'binomial', data = df
+  )
+
+# known gam model
+gam_pr_mod <- gam(
+    as.formula(
+    paste0('trt ~ s(age) + ', paste(colnames(df)[c(3,4,6:ncol(df))], collapse = ' + ' ) )
+    ), 
+  family = 'binomial', data = df
+  ) 
+
+# lasso
+lasso_pr_mod <- cv.glmnet(
+  x = as.matrix( df[, 3:ncol(df)] ) , 
+  y = df$trt , 
+  alpha = 1.0, # lasso penalty
+  family = 'binomial'
+)
+
+
+# xgb model
+xgb_pr_mod <- xgboost(
+  data = as.matrix( df[, 3:ncol(df)] ),
+  label = df$trt, 
+  max_depth = 4, eta = 0.01, nrounds = 1000, verbose = 0, nthread = 4, 
+  objective = "binary:logistic"
+)
+
+
+# get predictions from models back
+lin_pred <- predict(lin_pr_mod, newdata = df, type = 'response')
+
+gam_pred <- predict(gam_pr_mod, newdata = df, type = 'response') 
+
+lasso_pred <- predict(lasso_pr_mod, newx = as.matrix( df[, 3:ncol(df)] ), s = "lambda.min", type = 'response')
+colnames(lasso_pred) <- 'lasso_pred'
+
+xgb_pred <- predict(xgb_pr_mod, newdata = as.matrix( df[, 3:ncol(df)] ))
+
+```
+
+
+Applying different weights. Average treatment effect (ATE), 
+average treatment effect among treated (ATT), average treatment effect among
+evenly match (ATM), average treatment effect of observed (ATO).
+
+
+```{r create_ate_weights}
+p_weights <- function(outcome, treatment, propensity_score) {
+  # ate
+  w_ate = (treatment / propensity_score) + ((1 - treatment) / (1 - propensity_score))
+  
+  # att
+  w_att = ((propensity_score * treatment) / propensity_score) + 
+      ((propensity_score * (1 - treatment)) / (1 - propensity_score))
+  
+  # atc
+  w_atc = (((1 - propensity_score) * treatment) / propensity_score) + 
+      (((1 - propensity_score) * (1 - treatment)) / (1 - propensity_score))
+  
+  # atm
+  w_atm = pmin(propensity_score, 1 - propensity_score) / 
+      (treatment * propensity_score + (1 - treatment) * (1 - propensity_score))
+  
+  # ato
+  w_ato = (1 - propensity_score) * treatment + propensity_score * (1 - treatment)
+  
+  # dataframe with weights
+  weight_df <- data.frame(
+    outcome = outcome, 
+    treatment = treatment,
+    propensity = propensity_score, 
+    w_ate = w_ate,
+    w_att = w_att,
+    w_atc = w_atc, 
+    w_atm = w_atm, 
+    w_ato = w_ato
+    )
+  
+  return(weight_df)
+}
+
+# weight lists
+lin_wt_df <- p_weights(outcome = df$outcome, treatment = df$trt, propensity_score = lin_pred)
+gam_wt_df <- p_weights(outcome = df$outcome, treatment = df$trt, propensity_score = gam_pred)
+lasso_wt_df <- p_weights(outcome = df$outcome, treatment = df$trt, propensity_score = as.vector( lasso_pred ) )
+xgb_wt_df <- p_weights(outcome = df$outcome, treatment = df$trt, propensity_score = xgb_pred)
+
+```
+
+Plots of propensity scores.
+
+```{r wt_plots}
+d <- lin_wt_df %>% 
+  tidyr::spread(treatment, propensity, sep = "_p")
+  
+
+ggplot(d) +
+  geom_histogram(bins = 50, aes(treatment_p1), alpha = 0.5) + 
+  geom_histogram(bins = 50, aes(treatment_p1, weight = w_ate, fill = "Treated"), alpha = 0.5) + 
+  geom_histogram(bins = 50, alpha = 0.5, aes(x = treatment_p0, y = -..count..)) + 
+  geom_histogram(bins = 50, aes(x = treatment_p0, weight = w_ate, y = -..count.., fill = "Not Treated"),
+                 alpha = 0.5) + 
+  scale_fill_manual('', values = c('blue', 'red') ) +
+  ylab("Count") + 
+  xlab("Propensity") +
+  ggtitle('ATE weighting of propensity: linear model') +
+  geom_hline(yintercept = 0, lwd = 0.5) +
+  scale_y_continuous(label = abs)  +
+  theme_linedraw()
+
+```
+
+```{r lin_att}
+ggplot(d) +
+  geom_histogram(bins = 50, aes(treatment_p1), alpha = 0.5) + 
+  geom_histogram(bins = 50, aes(treatment_p1, weight = w_att, fill = "Treated"), alpha = 0.5) + 
+  geom_histogram(bins = 50, alpha = 0.5, aes(x = treatment_p0, y = -..count..)) + 
+  geom_histogram(bins = 50, aes(x = treatment_p0, weight = w_att, y = -..count.., fill = "Not Treated"),
+                 alpha = 0.5) + 
+  scale_fill_manual('', values = c('blue', 'red') ) +
+  ylab("Count") + 
+  xlab("Propensity") +
+  ggtitle('ATT weighting of propensity: linear model') +
+  geom_hline(yintercept = 0, lwd = 0.5) +
+  scale_y_continuous(label = abs)  +
+  theme_linedraw()
+```
+```{r lin_atm}
+ggplot(d) +
+  geom_histogram(bins = 50, aes(treatment_p1), alpha = 0.5) + 
+  geom_histogram(bins = 50, aes(treatment_p1, weight = w_atm, fill = "Treated"), alpha = 0.5) + 
+  geom_histogram(bins = 50, alpha = 0.5, aes(x = treatment_p0, y = -..count..)) + 
+  geom_histogram(bins = 50, aes(x = treatment_p0, weight = w_atm, y = -..count.., fill = "Not Treated"),
+                 alpha = 0.5) + 
+  scale_fill_manual('', values = c('blue', 'red') ) +
+  ylab("Count") + 
+  xlab("Propensity") +
+  ggtitle('ATM weighting of propensity: linear model') +
+  geom_hline(yintercept = 0, lwd = 0.5) +
+  scale_y_continuous(label = abs)  +
+  theme_linedraw()
+```
+
+Propensity models with weights.
+
+```{r prop_wt_estimates}
+# ate estimates
+lin_prop_mod_ate <- glm(outcome ~ trt, data = lin_wt_df, family = 'quasibinomial', weights = w_ate) 
+gam_prop_mod_ate <- glm(outcome ~ trt, data = gam_wt_df, family = 'quasibinomial', weights = w_ate) 
+lasso_prop_mod_ate <- glm(outcome ~ trt, data = lasso_wt_df, family = 'quasibinomial', weights = w_ate) 
+xgb_prop_mod_ate <- glm(outcome ~ trt, data = xgb_wt_df, family = 'quasibinomial', weights = w_ate) 
+
+# atm estimates
+lin_prop_mod_atm <- glm(outcome ~ trt, data = lin_wt_df, family = 'quasibinomial', weights = w_atm) 
+gam_prop_mod_atm <- glm(outcome ~ trt, data = gam_wt_df, family = 'quasibinomial', weights = w_atm) 
+lasso_prop_mod_atm <- glm(outcome ~ trt, data = lasso_wt_df, family = 'quasibinomial', weights = w_atm) 
+xgb_prop_mod_atm <- glm(outcome ~ trt, data = xgb_wt_df, family = 'quasibinomial', weights = w_atm) 
+```
+
+
+```{r propensity_estimates}
+p_est <- c(
+  'P-Score Lin ATE',
+  'P-Score GAM ATE' , 
+  'P-Score Lasso ATE',
+  'P-Score XGB ATE' , 
+  'P-Score Lin ATM',
+  'P-Score GAM ATM' , 
+  'P-Score Lasso ATM',
+  'P-Score XGB ATM' 
+  ) 
+
+
+# propensity coef
+p_coef <- c(
+  # ate
+  coef(lin_prop_mod_ate)['trt']
+  , coef(gam_prop_mod_ate)['trt']
+  , coef(lasso_prop_mod_ate)['trt']
+  , coef(xgb_prop_mod_ate)['trt']
+  # atm
+  , coef(lin_prop_mod_atm)['trt']
+  , coef(gam_prop_mod_atm)['trt']
+  , coef(lasso_prop_mod_atm)['trt']
+  , coef(xgb_prop_mod_atm)['trt'] 
+  )
+
+
+p_score_df <- data.frame(
+  estimation = 'Propensity', 
+  method = p_est, 
+  coef = p_coef
+  )  %>% 
+  mutate(
+    method = factor( method , levels = method ), 
+    odds_ratio = exp( coef )
+  )
+
+```
+
+
+## TMLE 
+
+This is a doubly-robust approach to estimating marginal effect that can use
+machine learning models in an ensemble model. 
+
+```{r tmle}
+
+# libraries to fit g and q formula in tmle
+sl_libs <- c('SL.mean', 'SL.glm', 'SL.step', 'SL.glmnet', 'SL.gbm', 'SL.xgboost')
+
+tmle_mod <- tmle(
+  outcome, trt, as.matrix( df[, 3:ncol(df)] ) , family = 'binomial', 
+  g.SL.library = sl_libs , 
+  Q.SL.library = sl_libs , 
+  V = 3, # use fewer cross validation folds, default it 10
+)
+
+```
+
+```{r}
+summary(tmle_mod)
+
+```
+
+
+```{r combind_metrics}
+final_df <- g_df %>% 
+  rbind(p_score_df) %>% 
+  rbind(
+    data.frame(
+      estimation = 'TMLE',
+      method = 'TMLE', 
+      coef = -0.52012 , 
+      odds_ratio = 0.59445
+      )
+    ) %>% 
+  mutate(
+    estimation = case_when(
+      method %in% c('Unadjusted GLM', 'Correct Adj GLM') ~ 'Conditional Models', 
+      TRUE ~ estimation
+    )
+  )
+
+
+final_df
+```
+
+
+
+Final plot summarizing df.
+
+```{r}
+ggplot(
+  data = final_df, 
+  aes( x = factor(method, levels = method), y = odds_ratio , color = estimation) ) +
+  geom_point() +
+  coord_flip() +
+  scale_x_discrete(
+    limits = rev(factor(final_df$method, levels = final_df$method))
+    )  +
+  geom_hline(yintercept = exp( trt_out_association_true ), color = 'red') +
+  ylim( 0.25, 1.25 ) +
+  theme_linedraw() +
+  ylab('Odds Ratio') +
+  xlab('Estimation Method')
+```
+
+
+```{r}
+  ggplot(data = median_impute_pois %>% filter(!str_detect(term, 'time_factor')), 
+       aes( x = factor(term, levels = term), y = log(risk_ratio) ) ) +
+  geom_point(position = position_dodge(width = 0.5), 
+             color = 'darkblue') +
+  geom_errorbar( aes( ymin = log(lower_95), ymax = log(upper_95) ), 
+                 width = 0.3, 
+                 position = position_dodge(width = 0.5),
+                 color = 'darkblue') +
+  geom_hline(yintercept = 0, color = 'red', linetype = 'dashed') +
+  coord_flip() +
+  scale_x_discrete(
+    limits = rev(factor(results_table$term, levels = results_table$term))
+    ) +
+  xlab('Variable (continuous are standardized)') +
+  ylab('Log(Risk Ratio)') +
+  ggtitle('Poisson model') +
+  theme_minimal()
+```
+
