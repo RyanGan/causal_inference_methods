@@ -1,12 +1,16 @@
 ---
 title: "Causal inference methods examples part 2"
 author: "Ryan Gan"
-date: "8/7/2021"
-output: html_document
+date: "2021-10-19"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 2
 ---
 
 ```{r setup}
-# loading r packages i'll use in this example
+# loading r packages 
 library(tmle) # targeted maximum likelihood
 library(MASS)
 library(xgboost) # gradient boosting with l2 regularization
@@ -19,13 +23,9 @@ library(mgcv) # for non-linear terms
 
 Start by simulating a relationship between the treatment and a binary outcome. 
 Adding two known confounders that affect both treatment and outcome and adding
-some random normal variables with no association with either treatment or outcome
-(although may happen by chance).
+some random normal variables with no association with either treatment or outcome (although may happen by chance).
 
 
-
-- Simple sim
-- Interaction and non-linear sim
 ```{r sim}
 # binary confounder example 
 set.seed(100)
@@ -109,18 +109,9 @@ print(
   )
 ```
 
-# G-Computation
+# G-computation
 
-G-computation (counterfactual estimate) first proposed by Robins in the epi 
-literature sometime in the 1990s. In my opinion, this is Pearl's Do-calculus. 
-Both state that if we specify a model `outcome | treatment, covariates` sufficiently
-to account for confounding bias, then we have achieved condiitonal exchangability.
-We can then estimate the marginal effect of treatment on the outcome by taking
-the model and predicting as if everyone were treated, and predicting as if 
-no one was treated. The average predicted score where everyone is treated can
-then be compared to the average predicted score where no one was treated and 
-that should be the marginal risk difference (in a binary outcome) or relative
-ratio difference.
+G-computation (a.k.a simple substitution, counterfactual estimate) first proposed by Robins in the epi literature sometime in the 1990s. In my opinion, this is Pearl's Do-calculus. Both state that if we specify a model `outcome | treatment, covariates` sufficiently to account for confounding bias, then we have achieved conditional exchangeability. We can then estimate the marginal effect of treatment on the outcome by taking the model and predicting as if everyone were treated, and predicting as if no one was treated. The average predicted score where everyone is treated can then be compared to the average predicted score where no one was treated and that should be the marginal risk difference (in a binary outcome) or relative 6ratio difference.
 
 Using our adjusted model above, we can estimate this as follows:
 
@@ -159,39 +150,39 @@ print(
   )
 ```
 
-All covs in model.
+All covs in model; saturated model.
 
-```{r g_comp_glm_incorrect}
-inc_mod <- glm(outcome ~ trt + c1 + c2 + age + rv_1 + rv_2 + rv_3 + rv_4 + rv_5
-               + rv_6 + rv_7 + rv_8 + rv_9 + rv_10, 
-               family = binomial(link='logit'), data = df)
+```{r g_comp_glm_satorrect}
+saturated_mod <- glm(outcome ~ trt + c1 + c2 + age + rv_1 + rv_2 + rv_3 + rv_4
+                     + rv_5 + rv_6 + rv_7 + rv_8 + rv_9 + rv_10, 
+                     family = binomial(link='logit'), data = df)
 
 
 # estimate using fit model and take the average of predictions
-all_trt_pred_inc <- predict(inc_mod, newdata = all_trt_df, type = 'response') 
-no_trt_pred_inc <- predict(inc_mod, newdata = no_trt_df, type = 'response') 
+all_trt_pred_sat <- predict(saturated_mod, newdata = all_trt_df, type = 'response') 
+no_trt_pred_sat <- predict(saturated_mod, newdata = no_trt_df, type = 'response') 
 
 # means for risk
-trt_mean_inc <- mean( all_trt_pred_inc )
-no_trt_mean_inc <- mean( no_trt_pred_inc )
+trt_mean_sat <- mean( all_trt_pred_sat )
+no_trt_mean_sat <- mean( no_trt_pred_sat )
 
 # log odds ratio
-mean_log_odds_inc <- mean( 
-  log( ( all_trt_pred_inc / (1 - all_trt_pred_inc ) ) / (no_trt_pred_inc / (1 - no_trt_pred_inc)) )
+mean_log_odds_sat <- mean( 
+  log( ( all_trt_pred_sat / (1 - all_trt_pred_sat ) ) / (no_trt_pred_sat / (1 - no_trt_pred_sat)) )
   )
 
 # absolute reduction in risk
-print(paste0( 'Risk difference: ', round( trt_mean_inc - no_trt_mean_inc , 2 ) ) )
+print(paste0( 'Risk difference: ', round( trt_mean_sat - no_trt_mean_sat , 2 ) ) )
 # relative reduction in risk
-print(paste0( 'Relative risk: ', round( trt_mean_inc / no_trt_mean_inc , 2 ) ) )
+print(paste0( 'Relative risk: ', round( trt_mean_sat / no_trt_mean_sat , 2 ) ) )
 # odds ratio
-gcomp_or_inc <- ( trt_mean_inc / ( 1 - trt_mean_inc ) ) / (no_trt_mean_inc / ( 1 - no_trt_mean_inc ) )
-print(paste0('Odds ratio: ', round( gcomp_or_inc , 2)) )
+gcomp_or_sat <- ( trt_mean_sat / ( 1 - trt_mean_sat ) ) / (no_trt_mean_sat / ( 1 - no_trt_mean_sat ) )
+print(paste0('Odds ratio: ', round( gcomp_or_sat , 2)) )
 
 # bias
 print(
   paste0('Bias of True - Expected: ', 
-         round( trt_out_association_true - mean_log_odds_inc, 2)
+         round( trt_out_association_true - mean_log_odds_sat, 2)
          )
   )
 
@@ -294,13 +285,14 @@ print(
 
 ```
 
-Plot showing bias from true
+Plot showing bias from true.
+
 ```{r gcomp_bias_plot}
 est <- c('Unadjusted GLM', 'Correct Adj GLM', 'G-Comp Adj', 'G-Comp All Cov', 
          'G-Comp Lasso', 'G-Comp XGB')
 
-g_coef <- c(crude_trt_est, adj_mod$coefficients['trt'], log( g_comp_or ), 
-            log( gcomp_or_inc), log( gcomp_or_lasso ), log( gcomp_or_xgb ) )
+g_coef <- c(crude_trt_est, adj_mod$coefficients['trt'], log( gcomp_or ), 
+            log( gcomp_or_sat), log( gcomp_or_lasso ), log( gcomp_or_xgb ) )
 
 g_df <- data.frame(
   estimation  = 'G-Computation', 
@@ -436,7 +428,7 @@ xgb_wt_df <- p_weights(outcome = df$outcome, treatment = df$trt, propensity_scor
 
 ```
 
-Plots of propensity scores.
+Plots of propensity scores weighting schemes.
 
 ```{r wt_plots}
 d <- lin_wt_df %>% 
@@ -474,6 +466,8 @@ ggplot(d) +
   scale_y_continuous(label = abs)  +
   theme_linedraw()
 ```
+
+
 ```{r lin_atm}
 ggplot(d) +
   geom_histogram(bins = 50, aes(treatment_p1), alpha = 0.5) + 
@@ -542,13 +536,27 @@ p_score_df <- data.frame(
   )  %>% 
   mutate(
     method = factor( method , levels = method ), 
-    odds_ratio = exp( coef )
+    odds_ratio = exp( coef ), 
+    percent_bias = coef - log(0.5)
   )
 
 ```
 
+Plot for propensity score estimates difference from the true estimate.
 
-## TMLE 
+```{r pscore_plot}
+ggplot(p_score_df, aes( x = method, y = odds_ratio )) +
+  geom_point() +
+  geom_hline(yintercept = exp( trt_out_association_true ), color = 'red') +
+  ylim( 0.25, 1.25 ) +
+  theme_linedraw() +
+  ylab('Odds Ratio') +
+  xlab('Estimation Method') +
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5))
+```
+
+
+## Targeted-maximum likelihood estimation (TMLE)
 
 This is a doubly-robust approach to estimating marginal effect that can use
 machine learning models in an ensemble model. 
@@ -567,7 +575,8 @@ tmle_mod <- tmle(
 
 ```
 
-```{r}
+```{r tmle_summary}
+
 summary(tmle_mod)
 
 ```
@@ -597,9 +606,9 @@ final_df
 
 
 
-Final plot summarizing df.
+Final plot summarizing bias of estimates compared to true value.
 
-```{r}
+```{r summary_plot}
 ggplot(
   data = final_df, 
   aes( x = factor(method, levels = method), y = odds_ratio , color = estimation) ) +
@@ -615,24 +624,4 @@ ggplot(
   xlab('Estimation Method')
 ```
 
-
-```{r}
-  ggplot(data = median_impute_pois %>% filter(!str_detect(term, 'time_factor')), 
-       aes( x = factor(term, levels = term), y = log(risk_ratio) ) ) +
-  geom_point(position = position_dodge(width = 0.5), 
-             color = 'darkblue') +
-  geom_errorbar( aes( ymin = log(lower_95), ymax = log(upper_95) ), 
-                 width = 0.3, 
-                 position = position_dodge(width = 0.5),
-                 color = 'darkblue') +
-  geom_hline(yintercept = 0, color = 'red', linetype = 'dashed') +
-  coord_flip() +
-  scale_x_discrete(
-    limits = rev(factor(results_table$term, levels = results_table$term))
-    ) +
-  xlab('Variable (continuous are standardized)') +
-  ylab('Log(Risk Ratio)') +
-  ggtitle('Poisson model') +
-  theme_minimal()
-```
 
